@@ -30,3 +30,7 @@ De knokkers en skins gebruiken echte geriggde 3D-modellen uit `assets/models/` (
 - GLB-bestanden kunnen niet via `file://` geladen worden: start een server, bv. `npx http-server -c-1 .`, en open `http://localhost:8080`.
 - Lukt het laden niet, dan valt het spel terug op de procedurele modellen.
 - Eigen (gratis) modellen toevoegen: zet een `.glb` met animaties in `assets/models/` en verwijs ernaar in `GLB_BASE` / `SKINS`. Goede CC0-bronnen: KayKit, Kenney, Quaternius, OpenGameArt; animaties via Mixamo.
+
+## Maps
+
+Vier thema-arena's, elk met eigen indeling per modus, verlichting, props, wandstijl en sfeerdeeltjes: Zonnepark (park), Rode Canyon (woestijn), Ijsvelden (sneeuw) en Spookkerkhof (nacht, fakkels). Na elke wedstrijd wisselt de map; de hub toont de volgende arena.
