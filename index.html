@@ -138,7 +138,7 @@ const WALLS = [[300,150,40,160],[300,410,40,160],[860,150,40,160],[860,410,40,16
 const BUSHES = [[520,220,160,50],[520,450,160,50],[140,60,120,90],[940,570,120,90],[140,570,120,90],[940,60,120,90]];
 const SPAWNS = { 0:[[70,260],[70,360],[70,460]], 1:[[1130,260],[1130,360],[1130,460]] };
 const WIN_GEMS = 10, HOLD_TIME = 12, MATCH_TIME = 150, RESPAWN = 3, INTRO = 3.4;
-const GOAL = { y0:270, y1:450, depth:52 }, BALL_R = 10, BALL_WIN = 2, BALL_TIME = 120;
+const GOAL = { y0:270, y1:450, depth:52 }, BALL_R = 16, BALL_WIN = 2, BALL_TIME = 120;
 
 // =====================================================================
 //  STATE
@@ -415,10 +415,16 @@ scene.add(mineGroup, midCurb, ballGroup);
 
 const ballTex = (()=>{ const c = document.createElement('canvas'); c.width = 256; c.height = 128; const g = c.getContext('2d');
   g.fillStyle = '#ffffff'; g.fillRect(0,0,256,128); g.fillStyle = '#1b1030';
-  for (let i=0;i<14;i++) { g.beginPath(); const x = (i%7)*40+rnd(0,12), y = Math.floor(i/7)*64+14+rnd(0,20); g.arc(x,y,13,0,7); g.fill(); }
+  for (let r=0;r<4;r++) for (let c=0;c<8;c++) { const x = c*32+(r%2?16:0)+8, y = r*32+14; g.beginPath();
+    for (let k=0;k<5;k++) { const an = -Math.PI/2+k*Math.PI*2/5; g.lineTo(x+Math.cos(an)*9, y+Math.sin(an)*9); } g.closePath(); g.fill(); }
   return srgb(new THREE.CanvasTexture(c)); })();
 const ballMesh = mk(new THREE.IcosahedronGeometry(BALL_R,2), 0, { mat:toon('#ffffff',{ map:ballTex }), ol:.8 });
 ballMesh.visible = false; scene.add(ballMesh);
+// see-through copy of the ball, drawn on top so it stays visible inside bushes
+const ballGhost = new THREE.Mesh(ballMesh.geometry, new THREE.MeshBasicMaterial({ map:ballTex, transparent:true, opacity:.9, depthTest:false, depthWrite:false }));
+const ghostOl = new THREE.Mesh(ballMesh.geometry, new THREE.MeshBasicMaterial({ color:0x120a1c, side:THREE.BackSide, transparent:true, opacity:.95, depthTest:false, depthWrite:false }));
+ghostOl.scale.setScalar(1.1); ballGhost.add(ghostOl); ballGhost.renderOrder = 20; ghostOl.renderOrder = 19; ballGhost.visible = false; scene.add(ballGhost);
+const ballInBush = (b)=>BUSHES.some(r=>b.x>r[0]-BALL_R && b.x<r[0]+r[2]+BALL_R && b.y>r[1]-BALL_R && b.y<r[1]+r[3]+BALL_R);
 function applyModeVisuals() { mineGroup.visible = midCurb.visible = mode==='gem'; ballGroup.visible = mode==='ball'; }
 applyModeVisuals();
 
@@ -706,7 +712,7 @@ function renderMenu3D(dt, t) {
   camera.position.set(STAGE.x+8, 70+dd*.2, STAGE.z + dd); camera.lookAt(STAGE.x, 32, STAGE.z);
   camera.aspect = aspect; camera.updateProjectionMatrix();
   sun.position.set(STAGE.x-250, 700, STAGE.z+400); sun.target.position.set(STAGE.x,0,STAGE.z);
-  indStrip.visible = indSector.visible = indCircle.visible = lockRing.visible = false; ballMesh.visible = false;
+  indStrip.visible = indSector.visible = indCircle.visible = lockRing.visible = false; ballMesh.visible = false; ballGhost.visible = false;
   updateParticles(dt); renderer.render(scene, camera);
 }
 function render3D(dt, t) {
@@ -730,7 +736,8 @@ function render3D(dt, t) {
   if (mode==='ball' && ball) { const carried = !!ball.carrier; ballMesh.visible = true;
     ballMesh.position.set(ball.x, BALL_R+(carried?6+Math.abs(Math.sin(t*10))*2:1.5), ball.y);
     ballMesh.rotation.z -= ball.vx*dt/BALL_R; ballMesh.rotation.x += ball.vy*dt/BALL_R; if (carried) ballMesh.rotation.z -= dt*4;
-    if (!carried && Math.hypot(ball.vx,ball.vy)>160) burst(ball.x,10,ball.y,'#ffffff',1,20,.25,2,0); } else ballMesh.visible = false;
+    if (!carried && Math.hypot(ball.vx,ball.vy)>160) burst(ball.x,10,ball.y,'#ffffff',1,20,.25,2,0);
+    ballGhost.visible = ballInBush(ball); ballGhost.position.copy(ballMesh.position); ballGhost.rotation.copy(ballMesh.rotation); } else { ballMesh.visible = false; ballGhost.visible = false; }
   updateIndicators(player, t); updateParticles(dt);
   // camera
   const look = player.dead ? 0 : 1;
@@ -1068,7 +1075,7 @@ function ballUpdate(dt) {
   if (b.carrier) {
     const c = b.carrier;
     if (c.dead || c.stunT>0) { b.carrier = null; b.vx = rnd(-120,120); b.vy = rnd(-120,120); b.noPick = c; b.noPickT = .5; }
-    else { b.x = c.x+Math.cos(c.ang)*(R+3); b.y = c.y+Math.sin(c.ang)*(R+3); b.vx = b.vy = 0; return; }
+    else { b.x = c.x+Math.cos(c.ang)*(R+BALL_R*.5); b.y = c.y+Math.sin(c.ang)*(R+BALL_R*.5); b.vx = b.vy = 0; return; }
   }
   b.x += b.vx*dt; b.y += b.vy*dt;
   const f = Math.pow(.28,dt); b.vx *= f; b.vy *= f;
