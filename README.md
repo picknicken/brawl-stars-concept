@@ -22,3 +22,11 @@ Speel: open `index.html` in een browser (of `npx http-server`).
 - Karakters zijn procedureel gebouwd (`buildChar`): outlines met constante dikte in schermruimte, rim-licht, knipperende ogen, boze wenkbrauwen bij schieten, wapperende sjaals, haar en capes
 - Skins zijn recepten (`SKIN_RECIPES`): eigen kleurenpalet, verborgen basisonderdelen en extra onderdelen uit de `ACC`-bibliotheek (pompoenhoofd, vleugels, heksenhoed, schedel, bandages, wolfskop, slijm, spookstaart, ...)
 - Een nieuwe skin toevoegen: een regel in `SKINS` (naam, zeldzaamheid, prijs) en een recept in `SKIN_RECIPES`
+
+## 3D-modellen (GLB)
+
+De knokkers en skins gebruiken echte geriggde 3D-modellen uit `assets/models/` (KayKit Adventurers & Skeletons door Kay Lousberg, **CC0**, zie `assets/LICENSE-KayKit.txt`). Skins zijn andere modellen, andere wapens en/of kleurtinten.
+
+- GLB-bestanden kunnen niet via `file://` geladen worden: start een server, bv. `npx http-server -c-1 .`, en open `http://localhost:8080`.
+- Lukt het laden niet, dan valt het spel terug op de procedurele modellen.
+- Eigen (gratis) modellen toevoegen: zet een `.glb` met animaties in `assets/models/` en verwijs ernaar in `GLB_BASE` / `SKINS`. Goede CC0-bronnen: KayKit, Kenney, Quaternius, OpenGameArt; animaties via Mixamo.

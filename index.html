@@ -225,6 +225,7 @@
 <div id="fatal"><h2 id="fatalT" class="ink"></h2><div id="fatalM"></div></div>
 
 <script src="lib/three.min.js"></script>
+<script src="lib/gltf.js"></script>
 <script>
 'use strict';
 function fatal(t,m){ const f=document.getElementById('fatal'); f.style.display='flex'; document.getElementById('fatalT').textContent=t; document.getElementById('fatalM').textContent=m; }
@@ -588,8 +589,16 @@ function outlineMat(mul) {
     m = new THREE.ShaderMaterial({ side:THREE.BackSide,
       uniforms:{ uRes:{ value:OUT_RES }, uPx:OUT_PX, uMul:{ value:mul }, uCol:{ value:new THREE.Color(0x120a1c) } },
       vertexShader:`attribute vec3 sn; uniform vec2 uRes; uniform float uPx; uniform float uMul;
-        void main() { vec4 clip = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-          vec3 vn = normalize(normalMatrix * sn); vec2 d = (projectionMatrix * vec4(vn,0.0)).xy; d = normalize(d + vec2(1e-5));
+        #include <common>
+        #include <skinning_pars_vertex>
+        void main() {
+          vec3 objectNormal = vec3(sn);
+          #include <skinbase_vertex>
+          #include <skinnormal_vertex>
+          vec3 transformed = vec3(position);
+          #include <skinning_vertex>
+          vec4 clip = projectionMatrix * modelViewMatrix * vec4(transformed,1.0);
+          vec3 vn = normalize(normalMatrix * objectNormal); vec2 d = (projectionMatrix * vec4(vn,0.0)).xy; d = normalize(d + vec2(1e-5));
           clip.xy += d * (uPx * uMul * 2.0) / uRes * clip.w; gl_Position = clip; }`,
       fragmentShader:`uniform vec3 uCol; void main() { gl_FragColor = vec4(uCol,1.0); }` });
     outCache.set(k,m);
@@ -1000,7 +1009,7 @@ const SKIN_RECIPES = {
 };
 
 // ---- build one character ----
-function buildChar(u) {
+function buildCharProc(u) {
   const b = u.b, id = b.id, skinDef = u.skin ? skinById(u.skin) : null, rec = skinDef ? SKIN_RECIPES[skinDef.id] : null;
   const pal = Object.assign({}, PAL[id], rec && rec.pal), ctx = makeCtx(id, pal, skinDef);
   const { root, rig } = ctx, teamCol = u.team===0 ? '#3da5ff' : '#ff5a5a';
@@ -1019,9 +1028,16 @@ function buildChar(u) {
   return root;
 }
 
+// ---- GLB characters first, procedural as fallback ----
+function buildChar(u) {
+  const sk = u.skin ? skinById(u.skin) : null, spec = glbSpec(u.b.id, sk);
+  return glbReady(spec) ? buildCharGLB(u, spec) : buildCharProc(u);
+}
+
 // ---- animation ----
 function animateChar(u, m, dt, t) {
   const d = m.userData;
+  if (d.glb) return animateGLB(u, m, dt, t);
   const moved = Math.hypot(u.x-(u.px??u.x), u.y-(u.py??u.y)); u.px = u.x; u.py = u.y;
   u.phase = (u.phase||0) + (moved>.15 ? dt*(d.id==='boulder'?9:13) : 0);
   u.recoil = Math.max(0,(u.recoil||0) - dt*(d.id==='boulder'?5:7));
@@ -1064,6 +1080,166 @@ function animateChar(u, m, dt, t) {
   d.disc.material.opacity = .28; d.ring.scale.setScalar(u.sup>=100 ? 1.08+Math.sin(t*9)*.08 : 1);
   if (u.sup>=100) d.ring.material.color.set(u.team===0?'#a8dcff':'#ffb0b0'); else d.ring.material.color.set(u.team===0?'#3da5ff':'#ff5a5a');
 }
+
+// =====================================================================
+//  GLB CHARACTERS: KayKit Adventurers + Skeletons (CC0, by Kay Lousberg)
+//  Falls back to the procedural models above when the files can't load.
+// =====================================================================
+const GLB = { m:{}, ver:0, port:{}, tex:{}, failed:0, started:false };
+const GLB_SCALE = 21;
+const GLB_BASE = { blaze:'Barbarian', bolt:'Rogue_Hooded', boulder:'Knight', frost:'Mage', melody:'Skeleton_Mage', shade:'Rogue' };
+const WEAPON_NODES = {
+  Knight:['1H_Sword_Offhand','Badge_Shield','Rectangle_Shield','Round_Shield','Spike_Shield','1H_Sword','2H_Sword'],
+  Barbarian:['1H_Axe_Offhand','Barbarian_Round_Shield','1H_Axe','2H_Axe','Mug'],
+  Mage:['Spellbook','Spellbook_open','1H_Wand','2H_Staff'],
+  Rogue:['Knife_Offhand','1H_Crossbow','2H_Crossbow','Knife','Throwable'],
+  Rogue_Hooded:['Knife_Offhand','1H_Crossbow','2H_Crossbow','Knife','Throwable'],
+};
+const GLB_KIT = {
+  blaze:  { show:['1H_Axe'], shoot:'Spellcast_Shoot', sup:'Spellcast_Raise' },
+  bolt:   { show:['2H_Crossbow'], shoot:'2H_Ranged_Shoot', sup:'Spellcast_Shoot' },
+  boulder:{ show:['1H_Sword','Round_Shield'], shoot:'1H_Melee_Attack_Chop', sup:'Spellcast_Raise' },
+  frost:  { show:['2H_Staff'], shoot:'Spellcast_Shoot', sup:'Spellcast_Raise' },
+  melody: { show:[], ext:{ r:'Skeleton_Staff' }, shoot:'Spellcast_Shoot', sup:'Spellcast_Raise' },
+  shade:  { show:['Knife','Knife_Offhand'], shoot:'1H_Melee_Attack_Chop', sup:'Dodge_Forward' },
+};
+const GLB_FILES = ['Knight','Barbarian','Mage','Rogue','Rogue_Hooded','Skeleton_Mage','Skeleton_Minion','Skeleton_Rogue','Skeleton_Warrior','Skeleton_Staff','Skeleton_Blade','Skeleton_Crossbow','Skeleton_Axe','Skeleton_Shield_Small_A'];
+
+function glbSpec(id, skin) {
+  const kit = GLB_KIT[id], model = (skin && skin.model) || GLB_BASE[id], same = model === GLB_BASE[id];
+  return { model, shoot:kit.shoot, sup:kit.sup,
+    show: (skin && skin.show) || (same ? kit.show : []),
+    ext: (skin && skin.ext) || (same ? kit.ext : null),
+    tint: skin && skin.tint ? skin.tint : (skin && !skin.model && skin.hue!==undefined ? { hue:skin.hue, sat:skin.sat, lit:skin.lit } : null) };
+}
+const glbReady = spec=>!!GLB.m[spec.model] && (!spec.ext || Object.values(spec.ext).every(n=>GLB.m[n]));
+
+function loadModels() {
+  if (GLB.started) return; GLB.started = true;
+  if (!THREE.GLTFLoader) { GLB.failed = 99; return; }
+  const loader = new THREE.GLTFLoader();
+  for (const name of GLB_FILES) loader.load('assets/models/'+name+'.glb', g=>{
+    GLB.m[name] = { scene:g.scene, anims:g.animations }; GLB.ver++; GLB.port = {};
+    try { refreshAll(); } catch(e) {}
+  }, undefined, ()=>{ GLB.failed++; });
+}
+
+// ---- recolour the palette texture (hue / saturation / lightness) ----
+function tintedTexture(model, t, baseTex) {
+  const key = model+'|'+t.hue+'|'+t.sat+'|'+t.lit; if (GLB.tex[key]) return GLB.tex[key];
+  const img = baseTex.image, c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d'); g.drawImage(img,0,0); const d = g.getImageData(0,0,c.width,c.height), p = d.data, hs = t.hue/360;
+  for (let i=0;i<p.length;i+=4) {
+    const r = p[i]/255, gg = p[i+1]/255, b = p[i+2]/255, mx = Math.max(r,gg,b), mn = Math.min(r,gg,b); let h = 0, s = 0, l = (mx+mn)/2;
+    if (mx!==mn) { const dd = mx-mn; s = l>.5 ? dd/(2-mx-mn) : dd/(mx+mn); h = mx===r ? (gg-b)/dd+(gg<b?6:0) : mx===gg ? (b-r)/dd+2 : (r-gg)/dd+4; h /= 6; }
+    h = ((h+hs)%1+1)%1; s = clamp(s*t.sat,0,1); l = clamp(l*t.lit,0,1);
+    const q = l<.5 ? l*(1+s) : l+s-l*s, pp = 2*l-q, f = x=>{ x = (x%1+1)%1; return x<1/6 ? pp+(q-pp)*6*x : x<.5 ? q : x<2/3 ? pp+(q-pp)*(2/3-x)*6 : pp; };
+    if (s===0) p[i] = p[i+1] = p[i+2] = l*255; else { p[i] = f(h+1/3)*255; p[i+1] = f(h)*255; p[i+2] = f(h-1/3)*255; }
+  }
+  g.putImageData(d,0,0);
+  const tex = new THREE.CanvasTexture(c); tex.flipY = baseTex.flipY; tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4; tex.needsUpdate = true;
+  return GLB.tex[key] = tex;
+}
+
+const visibleChain = o=>{ for (let p=o; p; p=p.parent) if (!p.visible) return false; return true; };
+function restyleGLB(root, tint, flash, model) {       // toon material + outline for every visible mesh
+  const meshes = []; root.traverse(o=>{ if (o.isMesh && visibleChain(o)) meshes.push(o); });
+  for (const o of meshes) {
+    const om = o.material, map = tint && om.map ? tintedTexture(model, tint, om.map) : om.map;
+    const mat = charMat('#ffffff', map ? { map } : { color:om.color });
+    o.material = mat; flash.push({ m:mat, ec:mat.emissive.clone() }); o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
+    addSmooth(o.geometry);
+    if (o.isSkinnedMesh) { const ol = new THREE.SkinnedMesh(o.geometry, outlineMat(1)); ol.bind(o.skeleton, o.bindMatrix); ol.frustumCulled = false; o.parent.add(ol); }
+    else o.add(new THREE.Mesh(o.geometry, outlineMat(1)));
+  }
+}
+
+function buildCharGLB(u, spec, noAdd) {
+  const root = new THREE.Group(), rig = new THREE.Group(); root.add(rig);
+  const teamCol = u.team===0 ? '#3da5ff' : '#ff5a5a';
+  const ring = new THREE.Mesh(new THREE.RingGeometry(18,23,44), new THREE.MeshBasicMaterial({ color:teamCol, side:THREE.DoubleSide })); ring.rotation.x = -Math.PI/2; ring.position.y = 1; root.add(ring);
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(18,44), new THREE.MeshBasicMaterial({ color:teamCol, transparent:true, opacity:.28, side:THREE.DoubleSide })); disc.rotation.x = -Math.PI/2; disc.position.y = .8; root.add(disc);
+  const blob = new THREE.Mesh(new THREE.CircleGeometry(15,24), new THREE.MeshBasicMaterial({ color:0x000000, transparent:true, opacity:.3, depthWrite:false })); blob.rotation.x = -Math.PI/2; blob.position.y = .5; root.add(blob);
+  const M = GLB.m[spec.model], inst = THREE.SkeletonUtils.clone(M.scene), flash = [];
+  const hide = new Set((WEAPON_NODES[spec.model]||[]).filter(n=>!spec.show.includes(n)));
+  inst.traverse(o=>{ if (hide.has(o.name)) o.visible = false; });
+  restyleGLB(inst, spec.tint, flash, spec.model);
+  if (spec.ext) for (const side of Object.keys(spec.ext)) {
+    const bone = inst.getObjectByName('handslot'+side) || inst.getObjectByName('handslot.'+side) || inst.getObjectByName('handslot'+side.toUpperCase()); const W = GLB.m[spec.ext[side]];
+    if (!bone || !W) continue;
+    const w = THREE.SkeletonUtils.clone(W.scene); bone.add(w); restyleGLB(w, spec.tint, flash, spec.ext[side]);
+  }
+  inst.scale.setScalar(GLB_SCALE); inst.rotation.y = Math.PI/2; rig.add(inst);
+  const mixer = new THREE.AnimationMixer(inst), acts = {};
+  for (const clip of M.anims) acts[clip.name] = mixer.clipAction(clip);
+  if (acts.Idle) acts.Idle.play();
+  u.top = 66;
+  if (!noAdd) scene.add(root);
+  root.userData = { glb:true, mixer, acts, cur:'Idle', oneT:0, spec, rig, flash, ring, disc, id:u.b.id, S:1, lastRecoil:0, hover:0 };
+  return root;
+}
+function glbPlayOnce(d, name, speed) {
+  const a = d.acts[name]; if (!a) return; const prev = d.acts[d.cur];
+  a.reset(); a.setLoop(THREE.LoopOnce,1); a.clampWhenFinished = true; a.timeScale = speed||1.6; a.fadeIn(.06).play();
+  if (prev && prev!==a) prev.fadeOut(.1);
+  d.cur = name; d.oneT = a.getClip().duration/a.timeScale*.8;
+}
+function glbFadeTo(d, name, dur) {
+  const n = d.acts[name]; if (!n) return; const prev = d.acts[d.cur];
+  n.reset(); n.setLoop(THREE.LoopRepeat); n.clampWhenFinished = false; n.timeScale = name==='Running_A' ? 1.1 : 1; n.fadeIn(dur).play();
+  if (prev && prev!==n) prev.fadeOut(dur); d.cur = name;
+}
+function animateGLB(u, m, dt, t) {
+  const d = m.userData;
+  const moved = Math.hypot(u.x-(u.px??u.x), u.y-(u.py??u.y)); u.px = u.x; u.py = u.y;
+  u.recoil = Math.max(0,(u.recoil||0) - dt*7); u.pop = Math.min(1,(u.pop??1) + dt*4);
+  const walk = moved>.15 ? 1 : 0;
+  if (walk && dt>0) { u.dustT = (u.dustT||0)-dt; if (u.dustT<=0) { u.dustT = .17; burst(u.x,2,u.y,'#e6cf94',2,26,.45,2.6,40); } }
+  u.vang = u.vang===undefined ? u.ang : u.vang + angDiff(u.vang,u.ang)*Math.min(1,dt*16);
+  m.position.set(u.x,0,u.y); m.rotation.y = -u.vang;
+  const pop = 1-Math.pow(1-u.pop,3); m.scale.setScalar(.25+.75*pop);
+  if (u.recoil>.9 && d.lastRecoil<=.9) glbPlayOnce(d, u.lastFire==='super' ? d.spec.sup : u.lastFire==='cheer' ? 'Cheer' : d.spec.shoot, u.lastFire==='cheer' ? 1 : 1.7);
+  d.lastRecoil = u.recoil;
+  if (d.oneT>0) d.oneT -= dt; else { const want = walk ? 'Running_A' : 'Idle'; if (d.cur!==want) glbFadeTo(d, want, .14); }
+  d.mixer.update(dt);
+  let er = 0, eg = 0, eb = 0, k = 0;
+  if (u.flash>0) { er = eg = eb = .9; k = 1; } else if (u.stunT>0) { er = .1; eg = .5+.2*Math.sin(t*12); eb = .9; k = 1; } else if (u.slowT>0) { er = .02; eg = .2; eb = .45; k = 1; }
+  for (const f of d.flash) { if (k) f.m.emissive.setRGB(er,eg,eb); else f.m.emissive.copy(f.ec); }
+  d.disc.material.opacity = .28; d.ring.scale.setScalar(u.sup>=100 ? 1.08+Math.sin(t*9)*.08 : 1);
+  if (u.sup>=100) d.ring.material.color.set(u.team===0?'#a8dcff':'#ffb0b0'); else d.ring.material.color.set(u.team===0?'#3da5ff':'#ff5a5a');
+}
+
+// ---- portraits: render the real model into a small picture ----
+let portScene = null, portCam = null, portRT = null;
+function makeGLBPortrait(bid, skinId) {
+  const b = BRAWLERS.find(x=>x.id===bid), spec = glbSpec(bid, skinById(skinId));
+  const fake = { b, team:0, idx:0, ang:0, skin:skinId||null }, root = buildCharGLB(fake, spec, true), SZ = 192;
+  for (const c of root.children) if (c!==root.userData.rig) c.visible = false;
+  if (!portScene) {
+    portScene = new THREE.Scene(); portScene.add(new THREE.HemisphereLight('#ffffff','#b0a0d0',1.15)); const dl = new THREE.DirectionalLight('#ffffff',1.1); dl.position.set(80,120,60); portScene.add(dl);
+    portCam = new THREE.PerspectiveCamera(24,1,1,600); portRT = new THREE.WebGLRenderTarget(SZ,SZ); portRT.texture.encoding = THREE.sRGBEncoding;
+  }
+  portScene.add(root); root.userData.mixer.update(.05); root.updateMatrixWorld(true);
+  portCam.position.set(78,44,14); portCam.lookAt(0,38,0);
+  const pc = new THREE.Color(), pa = renderer.getClearAlpha(); renderer.getClearColor(pc);
+  const so = OUT_RES.clone(), pxo = OUT_PX.value; OUT_RES.set(SZ,SZ); OUT_PX.value = 2.6;
+  renderer.setRenderTarget(portRT); renderer.setClearColor(0x000000,0); renderer.clear(); renderer.render(portScene,portCam); renderer.setRenderTarget(null); renderer.setClearColor(pc,pa);
+  OUT_RES.copy(so); OUT_PX.value = pxo;
+  const buf = new Uint8Array(SZ*SZ*4); renderer.readRenderTargetPixels(portRT,0,0,SZ,SZ,buf); portScene.remove(root);
+  const c = document.createElement('canvas'); c.width = c.height = SZ; const g = c.getContext('2d');
+  const bg = g.createLinearGradient(0,0,0,SZ); bg.addColorStop(0,'#6a5cff'); bg.addColorStop(1,'#2a2468'); g.fillStyle = bg; g.fillRect(0,0,SZ,SZ);
+  const img = g.createImageData(SZ,SZ); for (let y=0;y<SZ;y++) img.data.set(buf.subarray((SZ-1-y)*SZ*4,(SZ-y)*SZ*4), y*SZ*4);
+  const tmp = document.createElement('canvas'); tmp.width = tmp.height = SZ; tmp.getContext('2d').putImageData(img,0,0); g.drawImage(tmp,0,0);
+  return c.toDataURL('image/png');
+}
+function portraitSrc(b, skinId) {
+  const k = b.id+':'+(skinId||''), s = skinById(skinId);
+  if (GLB.port[k]) return { src:GLB.port[k], css:'' };
+  const spec = glbSpec(b.id, s);
+  if (glbReady(spec)) { try { GLB.port[k] = makeGLBPortrait(b.id, skinId); return { src:GLB.port[k], css:'' }; } catch(e) { console.error(e); } }
+  return { src:portraitURL(b), css:skinCSS(s) };
+}
+const imgFor = (b, skinId, extra)=>{ const p = portraitSrc(b, skinId); return `<img src="${p.src}" style="${p.css}${extra||''}">`; };
 
 // ---------- particles ----------
 const pGeo = new THREE.IcosahedronGeometry(1,0);
@@ -1132,7 +1308,7 @@ podium.add(mk(new THREE.CylinderGeometry(42,46,8,40), '#4a40b8', { pos:[0,4,0], 
 podium.add(mk(new THREE.CylinderGeometry(36,36,2,40), '#ffd23a', { pos:[0,8.6,0], extra:{ emissive:new THREE.Color('#ff9a1f'), emissiveIntensity:.35 }, ol:.8 }));
 podium.position.set(STAGE.x,0,STAGE.z); podium.visible = false; scene.add(podium);
 function renderMenu3D(dt, t) {
-  const bi = scrName==='detail' ? detailI : sel, pb = BRAWLERS[bi], psk = previewSkinOv!==undefined ? (previewSkinOv||null) : equippedSkin(pb.id), pkey = bi+':'+psk;
+  const bi = scrName==='detail' ? detailI : sel, pb = BRAWLERS[bi], psk = previewSkinOv!==undefined ? (previewSkinOv||null) : equippedSkin(pb.id), pkey = bi+':'+psk+':'+GLB.ver;
   if (previewId !== pkey) {
     if (previewMesh) scene.remove(previewMesh);
     previewMesh = buildChar({ b:pb, team:0, idx:0, ang:0, skin:psk }); previewId = pkey; previewMesh.userData.popv = 0;
@@ -1140,7 +1316,7 @@ function renderMenu3D(dt, t) {
   }
   previewMesh.visible = showPreview; updateOutlineUniforms();
   previewRot += dt*.9; const d = previewMesh.userData, pu = previewUnit, tk = Math.floor(t/4.5);
-  if (pu.tk !== tk) { pu.tk = tk; pu.recoil = 1; }
+  if (pu.tk !== tk) { pu.tk = tk; pu.recoil = 1; pu.lastFire = 'cheer'; }
   animateChar(pu, previewMesh, dt, t);
   previewMesh.position.set(STAGE.x, 9, STAGE.z); previewMesh.rotation.y = -(.55 + Math.sin(previewRot)*.55); const sc = 1.35/d.S;
   previewMesh.scale.setScalar(sc * (previewMesh.userData.popv = Math.min(1,(previewMesh.userData.popv||0)+dt*4)));
@@ -1254,7 +1430,7 @@ function addSup(u, amt) { const was = u.sup; u.sup = Math.min(100, u.sup + amt);
 function fire(u, ang, isSuper) {
   const b = u.b;
   if (!isSuper && mode==='ball' && ball && ball.carrier===u) { u.ang = ang; kickBall(u, ang); return; }
-  u.recoil = 1; u.ang = ang;
+  u.recoil = 1; u.ang = ang; u.lastFire = isSuper ? 'super' : 'atk';
   const mx = u.x+Math.cos(ang)*26, mz = u.y+Math.sin(ang)*26;
   if (isSuper) {
     const s = b.sup; Snd.play('super', u.x, u.y);
@@ -1505,7 +1681,7 @@ function kickBall(u, ang) {
   ball.carrier = null; ball.lastKick = u; ball.noPick = u; ball.noPickT = .4;
   const sx = u.x+Math.cos(ang)*(R+BALL_R+4), sy = u.y+Math.sin(ang)*(R+BALL_R+4);
   if (!hitsWall(sx,sy,BALL_R)) { ball.x = sx; ball.y = sy; } else { ball.x = u.x; ball.y = u.y; }
-  ball.vx = Math.cos(ang)*640; ball.vy = Math.sin(ang)*640; u.recoil = 1;
+  ball.vx = Math.cos(ang)*640; ball.vy = Math.sin(ang)*640; u.recoil = 1; u.lastFire = 'atk';
   Snd.play('kick', u.x, u.y); burst(ball.x,12,ball.y,'#ffffff',6,110,.3,2.2);
 }
 function pushBall(x, y, rad, spd) {
@@ -1702,7 +1878,7 @@ function drawHUD(p, t) {
   // ---- world-anchored ----
   for (const u of units) {
     if (u.dead || !visibleTo(u,0) || u.pop<.5) continue;
-    const [sx,sy] = project(u.x, 80*(u.b.id==='boulder'?1.28:1), u.y);
+    const [sx,sy] = project(u.x, u.top ? u.top+14 : 80*(u.b.id==='boulder'?1.28:1), u.y);
     const w = 58*U, h = 13*U, pct = clamp(u.hp/u.b.hp,0,1), col = u.team===0?'#3fe06a':'#ff5a5a';
     rrect(sx-w/2,sy-h/2,w,h,h/2); hctx.fillStyle='rgba(8,5,24,.8)'; hctx.fill();
     rrect(sx-w/2+2*U,sy-h/2+2*U,(w-4*U)*pct,h-4*U,(h-4*U)/2); hctx.fillStyle=col; hctx.fill();
@@ -1924,18 +2100,18 @@ function scaledBrawler(b, lvl) {
 // ---- skins (colour variants, monster themed) ----
 const RAR = { rare:{ n:'Zeldzaam', c:'#3da5ff' }, epic:{ n:'Episch', c:'#b66cff' } };
 const SKINS = [
-  { id:'blaze_pompoen',  b:'blaze',   name:'Pompoen',      rar:'rare', hue:-10,  sat:1.1,  lit:.72, price:{ coins:900 } },
-  { id:'blaze_spook',    b:'blaze',   name:'Spookvuur',    rar:'epic', hue:190,  sat:1.1,  lit:1,   price:{ crystals:90 } },
-  { id:'bolt_zombie',    b:'bolt',    name:'Zombie',       rar:'rare', hue:-60,  sat:.85,  lit:.9,  price:{ coins:900 } },
-  { id:'bolt_mummie',    b:'bolt',    name:'Mummie',       rar:'epic', hue:20,   sat:.25,  lit:1.3, price:{ crystals:90 } },
-  { id:'boulder_troll',  b:'boulder', name:'Troll',        rar:'rare', hue:70,   sat:1,    lit:.9,  price:{ coins:900 } },
-  { id:'boulder_lava',   b:'boulder', name:'Lavagolem',    rar:'epic', hue:-25,  sat:1.6,  lit:.8,  price:{ crystals:90 } },
-  { id:'frost_heks',     b:'frost',   name:'Heks',         rar:'rare', hue:80,   sat:1,    lit:.85, price:{ coins:900 } },
-  { id:'frost_skelet',   b:'frost',   name:'Skelet',       rar:'epic', hue:0,    sat:.08,  lit:1.35,price:{ crystals:90 } },
-  { id:'melody_vampier', b:'melody',  name:'Vampier',      rar:'rare', hue:15,   sat:1.2,  lit:.55, price:{ coins:900 } },
-  { id:'melody_banshee', b:'melody',  name:'Banshee',      rar:'epic', hue:-130, sat:1,    lit:1.1, price:{ crystals:90 } },
-  { id:'shade_weerwolf', b:'shade',   name:'Weerwolf',     rar:'rare', hue:130,  sat:.8,   lit:1.1, price:{ coins:900 } },
-  { id:'shade_slijm',    b:'shade',   name:'Slijmmonster', rar:'epic', hue:-110, sat:1.3,  lit:1,   price:{ crystals:90 } },
+  { id:'blaze_ijs',      b:'blaze',   name:'IJsbarbaar',     rar:'rare', hue:180, sat:1,   lit:1,    price:{ coins:900 } },
+  { id:'blaze_minion',   b:'blaze',   name:'Skeletbarbaar',  rar:'epic', hue:0,   sat:1,   lit:1,    price:{ crystals:90 }, model:'Skeleton_Minion', ext:{ r:'Skeleton_Axe' } },
+  { id:'bolt_zombie',    b:'bolt',    name:'Zombie',         rar:'rare', hue:-75, sat:.9,  lit:.95,  price:{ coins:900 } },
+  { id:'bolt_skelet',    b:'bolt',    name:'Skeletschutter', rar:'epic', hue:0,   sat:1,   lit:1,    price:{ crystals:90 }, model:'Skeleton_Rogue', ext:{ r:'Skeleton_Crossbow' } },
+  { id:'boulder_gold',   b:'boulder', name:'Gouden Ridder',  rar:'rare', hue:30,  sat:1.25,lit:1.1,  price:{ coins:900 } },
+  { id:'boulder_skelet', b:'boulder', name:'Skeletridder',   rar:'epic', hue:0,   sat:1,   lit:1,    price:{ crystals:90 }, model:'Skeleton_Warrior', ext:{ r:'Skeleton_Blade', l:'Skeleton_Shield_Small_A' } },
+  { id:'frost_heks',     b:'frost',   name:'Heks',           rar:'rare', hue:85,  sat:1,   lit:.9,   price:{ coins:900 } },
+  { id:'frost_lich',     b:'frost',   name:'IJslich',        rar:'epic', hue:35,  sat:1.3, lit:1.05, price:{ crystals:90 }, model:'Skeleton_Mage', ext:{ r:'Skeleton_Staff' }, tint:{ hue:35, sat:1.3, lit:1.05 } },
+  { id:'melody_levend',  b:'melody',  name:'Levende Lyric',  rar:'rare', hue:290, sat:1,   lit:1.05, price:{ coins:900 }, model:'Mage', show:['2H_Staff'], tint:{ hue:290, sat:1, lit:1.05 } },
+  { id:'melody_spook',   b:'melody',  name:'Spookmagiër',    rar:'epic', hue:150, sat:1.4, lit:1.15, price:{ crystals:90 } },
+  { id:'shade_nacht',    b:'shade',   name:'Nachtschaduw',   rar:'rare', hue:250, sat:.9,  lit:.55,  price:{ coins:900 } },
+  { id:'shade_skelet',   b:'shade',   name:'Skeletschurk',   rar:'epic', hue:0,   sat:1,   lit:1,    price:{ crystals:90 }, model:'Skeleton_Rogue', ext:{ r:'Skeleton_Blade', l:'Skeleton_Blade' } },
 ];
 const skinById = id => SKINS.find(s=>s.id===id) || null;
 const equippedSkin = bid => { const id = SAVE.skinEq[bid]; return id && SAVE.skins[id] ? id : null; };
@@ -1996,8 +2172,8 @@ function passReward(t) {
   if (t===10) return { t:'skin', id:'bolt_zombie' }; if (t===20) return { t:'drop', tier:'gold' }; if (t%5===0) return { t:'drop', tier:'silver' };
   if (t%4===0) return { t:'crystals', n:10 }; return t%2 ? { t:'coins', n:80+t*10 } : { t:'energy', n:20+t*3 };
 }
-const ROAD = [[10,{t:'coins',n:100}],[25,{t:'brawler',id:'frost'}],[40,{t:'drop',tier:'wood'}],[60,{t:'energy',n:60}],[80,{t:'brawler',id:'melody'}],[110,{t:'skin',id:'blaze_pompoen'}],
-  [140,{t:'coins',n:300}],[170,{t:'brawler',id:'shade'}],[210,{t:'drop',tier:'silver'}],[260,{t:'crystals',n:30}],[320,{t:'drop',tier:'gold'}],[400,{t:'skin',id:'frost_skelet'}],[500,{t:'crystals',n:60}]];
+const ROAD = [[10,{t:'coins',n:100}],[25,{t:'brawler',id:'frost'}],[40,{t:'drop',tier:'wood'}],[60,{t:'energy',n:60}],[80,{t:'brawler',id:'melody'}],[110,{t:'skin',id:'blaze_ijs'}],
+  [140,{t:'coins',n:300}],[170,{t:'brawler',id:'shade'}],[210,{t:'drop',tier:'silver'}],[260,{t:'crystals',n:30}],[320,{t:'drop',tier:'gold'}],[400,{t:'skin',id:'frost_lich'}],[500,{t:'crystals',n:60}]];
 const trTotal = ()=>Object.values(SAVE.tr.per).reduce((a,b)=>a+b,0);
 const RANKS = [['BRONS',0],['ZILVER',40],['GOUD',120],['DIAMANT',260],['MYTHISCH',450]];
 function rankInfo(n) { let i = 0; for (let k=0;k<RANKS.length;k++) if (n>=RANKS[k][1]) i = k; const nx = RANKS[i+1]; return { name:RANKS[i][0], min:RANKS[i][1], next:nx?nx[1]:null }; }
@@ -2101,7 +2277,7 @@ function renderScreen() {
 }
 function renderCollection() {
   const cards = BRAWLERS.map((b,i)=>{ const own = SAVE.owned[b.id], s = skinById(equippedSkin(b.id));
-    return `<div class="bcard panel ${own?'':'locked'} ${i===sel?'sel':''}" data-act="detail" data-i="${i}"><img src="${portraitURL(b)}" style="${skinCSS(s)}">${own?`<span class="lv">Lv ${lvlOf(b.id)}</span>`:`<span class="lock">${ic('lock')}</span>`}<b>${b.name}</b><div class="row2"><span class="chip c-tr">${ic('trophy')}${SAVE.tr.per[b.id]||0}</span></div></div>`; }).join('');
+    return `<div class="bcard panel ${own?'':'locked'} ${i===sel?'sel':''}" data-act="detail" data-i="${i}">${imgFor(b, s?s.id:'')}${own?`<span class="lv">Lv ${lvlOf(b.id)}</span>`:`<span class="lock">${ic('lock')}</span>`}<b>${b.name}</b><div class="row2"><span class="chip c-tr">${ic('trophy')}${SAVE.tr.per[b.id]||0}</span></div></div>`; }).join('');
   return head(`Knokkers <span class="sub">${ownedIdx().length}/${BRAWLERS.length}</span>`) + `<div class="sbody"><div class="grid">${cards}</div></div>`;
 }
 function renderDetail() {
@@ -2110,7 +2286,7 @@ function renderDetail() {
   const dots = Array.from({length:LEVEL_MAX},(_,i)=>`<i class="${i<lvl?'on':''}"></i>`).join('');
   const eq = equippedSkin(b.id), shownSkin = previewSkinOv!==undefined ? previewSkinOv : eq;
   const skinItem = (id,name,rar,css)=>{ const owned = !id || SAVE.skins[id], cur = (shownSkin||'')===(id||'');
-    return `<div class="skin ${cur?'sel':''} ${owned?'':'locked'}" data-act="${owned?'equip':'previewSkin'}" data-id="${id}">${(eq||'')===(id||'')?`<span class="eq">${ic('check')}</span>`:''}<img src="${portraitURL(b)}" style="${css}"><div class="rb" style="background:${rar?RAR[rar].c:'#9aa0b8'}"></div>${name}</div>`; };
+    return `<div class="skin ${cur?'sel':''} ${owned?'':'locked'}" data-act="${owned?'equip':'previewSkin'}" data-id="${id}">${(eq||'')===(id||'')?`<span class="eq">${ic('check')}</span>`:''}${imgFor(b, id)}<div class="rb" style="background:${rar?RAR[rar].c:'#9aa0b8'}"></div>${name}</div>`; };
   const skinsHTML = skinItem('','Standaard',null,'') + SKINS.filter(s=>s.b===b.id).map(s=>skinItem(s.id,s.name,s.rar,skinCSS(s))).join('');
   const ps = previewSkinOv ? skinById(previewSkinOv) : null;
   const buy = ps && !SAVE.skins[ps.id] ? `<div class="muted" style="margin-top:8px">${ps.name} · <b style="color:${RAR[ps.rar].c}">${RAR[ps.rar].n}</b></div><button class="btn small ${canPay(ps.price)?'':'off'}" data-act="buySkin" data-id="${ps.id}" style="margin-top:6px">KOPEN ${costHTML(ps.price)}</button>` : '';
@@ -2129,7 +2305,7 @@ function renderShop() {
   if (tab==='skins') {
     const list = SKINS.slice().sort((a,b)=>(SAVE.skins[a.id]?1:0)-(SAVE.skins[b.id]?1:0));
     body = `<div class="shop">${list.map(s=>{ const b = BRAWLERS.find(x=>x.id===s.b), own = SAVE.skins[s.id];
-      return `<div class="scard panel"><img src="${portraitURL(b)}" style="${skinCSS(s)}"><b>${s.name}</b><div class="rbar" style="background:${RAR[s.rar].c}"></div><div class="rtag">${b.name} · ${RAR[s.rar].n}</div>${own?`<div class="muted" style="margin-top:6px">In bezit</div>`:`<button class="btn small ${canPay(s.price)?'':'off'}" data-act="buySkin" data-id="${s.id}" style="margin-top:6px">${costHTML(s.price)}</button>`}</div>`; }).join('')}</div>`;
+      return `<div class="scard panel">${imgFor(b, s?s.id:'')}<b>${s.name}</b><div class="rbar" style="background:${RAR[s.rar].c}"></div><div class="rtag">${b.name} · ${RAR[s.rar].n}</div>${own?`<div class="muted" style="margin-top:6px">In bezit</div>`:`<button class="btn small ${canPay(s.price)?'':'off'}" data-act="buySkin" data-id="${s.id}" style="margin-top:6px">${costHTML(s.price)}</button>`}</div>`; }).join('')}</div>`;
   } else {
     const price = { wood:{coins:150}, silver:{coins:400}, gold:{crystals:90} };
     body = `<div class="shop">${freeAvailable()?`<div class="scard panel">${chestSVG('silver')}<b>Gratis drop</b><div class="rtag">Elke dag een</div><button class="btn small green" data-act="freeDrop" style="margin-top:6px">PAK</button></div>`:''}`
@@ -2149,8 +2325,8 @@ function rewardInner(r) {
   if (r.t==='energy') return `<span class="big c-en">${ic('bolt')}</span><small>+${r.n}</small>`;
   if (r.t==='crystals') return `<span class="big c-cr">${ic('crystal')}</span><small>+${r.n}</small>`;
   if (r.t==='drop') return `<span class="big c-coin">${ic('chest')}</span><small>${TIERS[r.tier].n}</small>`;
-  if (r.t==='skin') { const s = skinById(r.id), b = BRAWLERS.find(x=>x.id===s.b); return `<img src="${portraitURL(b)}" style="${skinCSS(s)}"><small>${s.name}</small>`; }
-  const b = BRAWLERS.find(x=>x.id===r.id); return `<img src="${portraitURL(b)}"><small>${b.name}</small>`;
+  if (r.t==='skin') { const s = skinById(r.id), b = BRAWLERS.find(x=>x.id===s.b); return `${imgFor(b, s?s.id:'')}<small>${s.name}</small>`; }
+  const b = BRAWLERS.find(x=>x.id===r.id); return `${imgFor(b, '')}<small>${b.name}</small>`;
 }
 function renderRewards() {
   const tab = scrTab.rewards, tot = trTotal(); let body = '';
@@ -2179,8 +2355,8 @@ function rewardCard(r, i) {
   else if (r.t==='energy') { inner = `<div class="ric c-en">${ic('bolt')}</div>`; label = '+'+r.n; sub = 'Energie'; }
   else if (r.t==='crystals') { inner = `<div class="ric c-cr">${ic('crystal')}</div>`; label = '+'+r.n; sub = 'Kristallen'; }
   else if (r.t==='drop') { inner = `<div class="ric c-coin">${ic('chest')}</div>`; label = TIERS[r.tier].n; sub = 'Extra kist'; }
-  else if (r.t==='skin') { const s = skinById(r.id), b = BRAWLERS.find(x=>x.id===s.b); inner = `<div class="ric"><img src="${portraitURL(b)}" style="${skinCSS(s)}"></div>`; label = s.name; sub = `Nieuwe skin voor ${b.name}`; }
-  else { const b = BRAWLERS.find(x=>x.id===r.id); inner = `<div class="ric"><img src="${portraitURL(b)}"></div>`; label = b.name; sub = 'NIEUWE KNOKKER!'; }
+  else if (r.t==='skin') { const s = skinById(r.id), b = BRAWLERS.find(x=>x.id===s.b); inner = `<div class="ric">${imgFor(b, s?s.id:'')}</div>`; label = s.name; sub = `Nieuwe skin voor ${b.name}`; }
+  else { const b = BRAWLERS.find(x=>x.id===r.id); inner = `<div class="ric">${imgFor(b, '')}</div>`; label = b.name; sub = 'NIEUWE KNOKKER!'; }
   return `<div class="rcard panel ${r.isNew?'new':''}" style="animation-delay:${.1+i*.16}s">${inner}<b>${label}</b><small>${sub}</small></div>`;
 }
 function renderDrop() {
@@ -2298,7 +2474,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 if (document.fonts && document.fonts.load) document.fonts.load('20px "Lilita One"').catch(()=>{});
-showMenu();
+showMenu(); loadModels();
 requestAnimationFrame(frame);
 window.__game = { get BR(){ return BRAWLERS; }, skinById, endMatch, damage, skipIntro(){ introT = 0; }, setMode(m){ mode = m; applyModeVisuals(); }, setDiff(d){ diff = d; }, get ball(){ return ball; }, get score(){ return score; }, get mode(){ return mode; }, startMatch, showMenu, setSel:i=>{ sel=i; refreshHub(); }, get save(){ return SAVE; }, openScreen, ACT, get units(){return units;}, get state(){return state;}, get paused(){return paused;}, setPaused, get touch(){return touch;}, get aim(){return aimDisp;}, get lock(){return lockTarget&&lockTarget.b.id;}, W, H };
 </script>
