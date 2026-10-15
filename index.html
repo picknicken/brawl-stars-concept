@@ -97,22 +97,22 @@ if (typeof THREE === 'undefined') { fatal('Kan 3D niet laden','Three.js is niet 
 const W = 1200, H = 720, R = 16;
 const FONT = "'Lilita One','Arial Black','Trebuchet MS',system-ui,sans-serif";
 const BRAWLERS = [
-  { id:'blaze', name:'Blaze', role:'Vuurspuwer · Korte afstand', color:'#ff7a2f', hp:3600, speed:215, reload:1.5, style:'brawl',
+  { id:'blaze', name:'Cinder', role:'Vuurspuwer · Korte afstand', color:'#ff7a2f', hp:3600, speed:150, reload:1.5, style:'brawl',
     desc:'Shotgun met 3 kogels. Super: salvo van 9 kogels.', stats:{ hp:.55, speed:.8, range:.4, dmg:.8 },
     atk:{ pellets:3, spread:0.28, dmg:330, range:300, speed:620, r:6 }, sup:{ type:'burst', pellets:9, spread:0.7, dmg:380, range:340 } },
-  { id:'bolt', name:'Bolt', role:'Scherpschutter · Lange afstand', color:'#2fc7b5', hp:2700, speed:200, reload:1.9, style:'ranged',
+  { id:'bolt', name:'Falco', role:'Scherpschutter · Lange afstand', color:'#2fc7b5', hp:2700, speed:140, reload:1.9, style:'ranged',
     desc:'Eén harde kogel over grote afstand. Super: doorboort alles.', stats:{ hp:.4, speed:.7, range:1, dmg:1 },
     atk:{ pellets:1, spread:0, dmg:1000, range:560, speed:900, r:6 }, sup:{ type:'pierce', dmg:1700, range:760, r:14 } },
-  { id:'boulder', name:'Boulder', role:'Tank · Dichtbij', color:'#a07a52', hp:6200, speed:185, reload:1.4, style:'rush',
+  { id:'boulder', name:'Granite', role:'Tank · Dichtbij', color:'#a07a52', hp:6200, speed:125, reload:1.4, style:'rush',
     desc:'Slaat een schokgolf. Super: grote klap rondom.', stats:{ hp:1, speed:.5, range:.2, dmg:.55 },
     atk:{ pellets:1, spread:0, dmg:620, range:150, speed:520, r:20 }, sup:{ type:'slam', dmg:1500, radius:150 } },
-  { id:'frost', name:'Frost', role:'Magiër · Vertraagt', color:'#58b8ff', hp:3000, speed:205, reload:1.6, style:'ranged',
+  { id:'frost', name:'Rime', role:'Magiër · Vertraagt', color:'#58b8ff', hp:3000, speed:145, reload:1.6, style:'ranged',
     desc:'IJskogel vertraagt vijanden. Super: bevriest iedereen om je heen.', stats:{ hp:.45, speed:.75, range:.75, dmg:.6 },
     atk:{ pellets:1, spread:0, dmg:520, range:430, speed:560, r:9, slow:1.8 }, sup:{ type:'freeze', radius:190, dmg:700, stun:1.4 } },
-  { id:'melody', name:'Melody', role:'Support · Heelt vrienden', color:'#ff7ac8', hp:3400, speed:210, reload:1.5, style:'support',
+  { id:'melody', name:'Lyric', role:'Support · Heelt vrienden', color:'#ff7ac8', hp:3400, speed:148, reload:1.5, style:'support',
     desc:'Geluidsgolf raakt vijanden en heelt vrienden. Super: heelt je team in de buurt.', stats:{ hp:.5, speed:.8, range:.65, dmg:.45 },
     atk:{ pellets:1, spread:0, dmg:420, range:380, speed:600, r:11, pierce:true, heal:420 }, sup:{ type:'heal', radius:230, heal:2200, dmg:500 } },
-  { id:'shade', name:'Shade', role:'Sluipmoordenaar · Snel', color:'#8a5cff', hp:2400, speed:250, reload:1.1, style:'rush',
+  { id:'shade', name:'Vanta', role:'Sluipmoordenaar · Snel', color:'#8a5cff', hp:2400, speed:175, reload:1.1, style:'rush',
     desc:'Twee dolken van dichtbij. Super: spring naar voren en sla toe.', stats:{ hp:.3, speed:1, range:.25, dmg:.85 },
     atk:{ pellets:2, spread:.14, dmg:400, range:215, speed:820, r:5 }, sup:{ type:'dash', range:270, dmg:1400, radius:85 } },
 ];
@@ -927,7 +927,7 @@ function playerInput(u, dt) {
   if (supReq!==null && u.sup>=100) fire(u,supReq,true);
 }
 // ---------- smarter bots ----------
-const SKILL = { easy:{ err:.18, react:.5, dodge:.1, lead:0 }, normal:{ err:.09, react:.28, dodge:.5, lead:.7 }, hard:{ err:.035, react:.12, dodge:.9, lead:1 } };
+const SKILL = { easy:{ err:.32, react:1.0, dodge:0, lead:0, spd:.75, fire:2.2 }, normal:{ err:.2, react:.6, dodge:.08, lead:.2, spd:.85, fire:1.6 }, hard:{ err:.09, react:.3, dodge:.4, lead:.7, spd:.95, fire:1.15 } };
 function botThink(u, dt) {
   const sk = SKILL[diff], b = u.b, st = b.style, rng = b.atk.range;
   u.botT -= dt;
@@ -1004,22 +1004,22 @@ function botThink(u, dt) {
   if (moveLen>14 && Math.hypot(mx,my)>.01) {
     const a0 = Math.atan2(my,mx);
     for (const off of [0,.5,-.5,1,-1,1.6,-1.6,2.3,-2.3]) { if (!hitsWall(u.x+Math.cos(a0+off)*30,u.y+Math.sin(a0+off)*30,R)) { moveAng = a0+off; break; } }
-    if (moveAng!==null) moveUnit(u, Math.cos(moveAng), Math.sin(moveAng), dt);
+    if (moveAng!==null) moveUnit(u, Math.cos(moveAng), Math.sin(moveAng), dt*sk.spd);
   }
   // ---- shooting
   const react = u.seenT >= sk.react;
   if (bc===u) {                                    // carrying the ball: shoot at the goal
     const fxg = u.team===0?W:0, ty = clamp(u.y,GOAL.y0+25,GOAL.y1-25), dg = Math.hypot(fxg-u.x,ty-u.y);
-    if (u.shootCd<=0 && ((dg<420 && lineClear(u,{x:fxg,y:ty})) || (tgt && d<90))) { fire(u, Math.atan2(ty-u.y,fxg-u.x)+rnd(-sk.err,sk.err), false); u.shootCd = .5; }
+    if (u.shootCd<=0 && ((dg<420 && lineClear(u,{x:fxg,y:ty})) || (tgt && d<90))) { fire(u, Math.atan2(ty-u.y,fxg-u.x)+rnd(-sk.err,sk.err), false); u.shootCd = .5*sk.fire; }
     else if (moveAng!==null) u.ang = moveAng;
   } else if (tgt) {
     let ax = tgt.x, ay = tgt.y;
     if (sk.lead) { const t = d/b.atk.speed; ax += (tgt.vx||0)*t*sk.lead; ay += (tgt.vy||0)*t*sk.lead; }
     const aim = Math.atan2(ay-u.y, ax-u.x); u.ang = aim;
-    if (react && d<rng && clear && u.ammo>=1 && u.shootCd<=0) { fire(u, aim+rnd(-sk.err,sk.err), false); u.shootCd = rnd(.3,.55)*(diff==='easy'?1.6:1); }
+    if (react && d<rng && clear && u.ammo>=1 && u.shootCd<=0) { fire(u, aim+rnd(-sk.err,sk.err), false); u.shootCd = rnd(.3,.55)*sk.fire; }
   } else if (moveAng!==null) u.ang = moveAng;
   // ---- super
-  if (u.sup>=100 && (react || st==='support' || bc===u)) {
+  if (u.sup>=100 && react && (Math.random() < dt*(diff==='hard'?4:diff==='normal'?1.5:.7))) {
     const s = b.sup, toT = tgt ? Math.atan2(tgt.y-u.y,tgt.x-u.x) : u.ang; let use = false, ang = toT;
     if (s.type==='slam') use = !!tgt && d<s.radius*.85;
     else if (s.type==='freeze') use = foes.some(e=>dist(e,u)<s.radius*.9);
