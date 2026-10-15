@@ -17,3 +17,8 @@ Speel: open `index.html` in een browser (of `npx http-server`).
 - **Kisten:** hout, zilver, goud. Je krijgt er na elk gevecht een, plus een gratis kist per dag
 - **Opdrachten, seizoenspas en trofeeënpad**, plus een winkel
 - Alles wordt in de browser bewaard (localStorage)
+
+## Modellen en skins
+- Karakters zijn procedureel gebouwd (`buildChar`): outlines met constante dikte in schermruimte, rim-licht, knipperende ogen, boze wenkbrauwen bij schieten, wapperende sjaals, haar en capes
+- Skins zijn recepten (`SKIN_RECIPES`): eigen kleurenpalet, verborgen basisonderdelen en extra onderdelen uit de `ACC`-bibliotheek (pompoenhoofd, vleugels, heksenhoed, schedel, bandages, wolfskop, slijm, spookstaart, ...)
+- Een nieuwe skin toevoegen: een regel in `SKINS` (naam, zeldzaamheid, prijs) en een recept in `SKIN_RECIPES`
