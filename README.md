@@ -1,6 +1,6 @@
 # Arena Brawlers
 
-Prototype van een Brawl Stars-achtige 3v3 arena-game (origineel: eigen namen en art).
+Prototype van een Brawl Stars-achtige 3v3 arena-game in 3D (three.js, toon-shading + outlines; eigen namen en art).
 
 Speel: open `index.html` in een browser (of `npx http-server`).
 
