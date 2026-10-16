@@ -34,3 +34,7 @@ De knokkers en skins gebruiken echte geriggde 3D-modellen uit `assets/models/` (
 ## Maps
 
 Vier thema-arena's, elk met eigen indeling per modus, verlichting, props, wandstijl en sfeerdeeltjes: Zonnepark (park), Rode Canyon (woestijn), Ijsvelden (sneeuw) en Spookkerkhof (nacht, fakkels). Na elke wedstrijd wisselt de map; de hub toont de volgende arena.
+
+## Game feel
+
+Hit-stop bij KO's, camera-punch en gekleurde schermflits bij een super, SUPER KLAAR-melding, KO-animatie (omhoog, draaien, krimpen) met sterretjes, respawn-ring, en een resultaatscherm waar je eigen team juichend (of teleurgesteld) op de map staat, met confetti bij winst.

@@ -129,7 +129,7 @@
   #pause { background:rgba(10,8,30,.78); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; } #pause h1 { margin:0; font-weight:400; font-size:clamp(40px,10vw,84px); color:var(--accent); text-shadow:0 6px 0 #a25a00, 0 9px 0 var(--ink), 3px 0 0 var(--ink), -3px 0 0 var(--ink), 0 -3px 0 var(--ink); }
 
   /* ---- end screen ---- */
-  #end { background:radial-gradient(ellipse at center, rgba(10,8,30,.55), rgba(10,8,30,.9)); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; padding:10px; }
+  #end { padding-left:44% !important; background:linear-gradient(90deg, rgba(10,8,30,0) 0%, rgba(10,8,30,0) 36%, rgba(10,8,30,.82) 58%); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; padding:10px; }
   #endRibbon { position:relative; padding:.05em 1.2em; animation:ribbon .6s cubic-bezier(.2,1.4,.4,1) both; }
   #endRibbon::before { content:''; position:absolute; inset:8% -6%; background:linear-gradient(180deg,var(--rc1,#ffd23a),var(--rc2,#ff9a1f)); border:5px solid var(--ink); border-radius:10px; box-shadow:0 8px 0 rgba(0,0,0,.4); transform:skewX(-8deg); z-index:-1; }
   #endTitle { margin:0; font-weight:400; font-size:clamp(40px,10vw,92px); letter-spacing:2px; color:#fff; text-shadow:0 6px 0 var(--ink), 4px 0 0 var(--ink), -4px 0 0 var(--ink), 0 -4px 0 var(--ink); }
@@ -273,6 +273,7 @@ const keys = {}, mouse = { cx:innerWidth/2, cy:innerHeight/2, x:W/2, y:H/2, down
 const touch = { on: matchMedia('(pointer:coarse)').matches, move:null, atk:null, sup:null, pendAtk:null, pendSup:null };
 let superQueued = false, aimDisp = null, lockTarget = null;
 let paused = false, feed = [], popups = [];
+let hitStop = 0, punch = 0, flashFx = null, endWin = -1;
 function pushPopup(s, color) { popups.push({ s, color, t0:performance.now() }); }
 function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch(e) {} }
 let mode = 'gem', diff = 'normal', score = [0,0], ball = null, goalT = 0, goalTeam = -1, overtime = false, matchOver = -2, introTitle = '';
@@ -1529,7 +1530,14 @@ function render3D(dt, t) {
   const player = units[0]; updateOutlineUniforms();
   for (const u of units) {
     let m = unitMesh.get(u); if (!m) { m = buildChar(u); unitMesh.set(u,m); }
-    const vis = !u.dead && visibleTo(u,0); m.visible = vis;
+    if (u.dead) {
+      u.deadT = (u.deadT===undefined?9:u.deadT) + dt; const k = u.deadT/.8;
+      if (k<1 && visibleTo(u,0)) { m.visible = true; animateChar(u, m, dt*.2, t);
+        m.position.y = Math.sin(Math.min(1,k*1.5)*Math.PI)*38; m.rotation.y += k*12; m.rotation.x = -k*.9; m.scale.multiplyScalar(Math.max(.02,1-Math.pow(k,2.4))); }
+      else m.visible = false;
+      u.px = u.x; u.py = u.y; continue;
+    }
+    m.rotation.x = 0; const vis = visibleTo(u,0); m.visible = vis;
     if (!vis) { u.px = u.x; u.py = u.y; continue; }
     animateChar(u, m, dt, t);
   }
@@ -1551,11 +1559,20 @@ function render3D(dt, t) {
   updateIndicators(player, t); updateParticles(dt); swayWorld(t); podium.visible = false;
   if (mode==='gem' && dt>0 && Math.random()<.14) burst(W/2+rnd(-34,34),26+rnd(0,26),H/2+rnd(-34,34),'#d9a8ff',1,8,1.5,2.2,-18);
   // camera
+  punch = Math.max(0, punch - dt*2.6);
+  if (state==='end') {
+    const asp = cv.clientWidth/cv.clientHeight, dd = 330/Math.min(1, asp*.75);
+    for (const u of units) if (u.team===0 && !u.dead) { u.cheerT = (u.cheerT||0) - dt; if (u.cheerT<=0) { u.cheerT = 2.6; if (endWin===0) { u.recoil = 1; u.lastFire = 'cheer'; } } }
+    if (endWin===0) { burst(STAGE.x-95+rnd(-230,40),170,STAGE.z+rnd(-80,40),['#ffd23a','#ff5ab0','#5ad0ff','#7dff8a','#ffffff'][Math.floor(rnd(0,5))],1,40,2.4,3.4,60); }
+    camera.position.set(255, 120+dd*.35, STAGE.z+dd*.92); camera.lookAt(255, 28, STAGE.z); camera.aspect = asp; camera.updateProjectionMatrix();
+    sun.position.set(STAGE.x-200, 700, STAGE.z+400); sun.target.position.set(STAGE.x,0,STAGE.z);
+    renderer.render(scene, camera); return;
+  }
   const look = player.dead ? 0 : 1;
   const tx = clamp(player.x, 330, W-330), tz = clamp(player.y, 190, H-190);
   camTarget.x += (tx-camTarget.x)*Math.min(1,dt*6); camTarget.z += (tz-camTarget.z)*Math.min(1,dt*6);
   const aspect = cv.clientWidth/cv.clientHeight, tf = Math.tan(THREE.MathUtils.degToRad(15));
-  const L = Math.max(400/(tf*aspect), 250/tf*0.85) * 0.84, ang = THREE.MathUtils.degToRad(57);
+  const L = Math.max(400/(tf*aspect), 250/tf*0.85) * 0.84 * (1-punch*.09), ang = THREE.MathUtils.degToRad(57);
   camera.position.set(camTarget.x, Math.sin(ang)*L, camTarget.z + Math.cos(ang)*L);
   if (shake>0) camera.position.add(new THREE.Vector3(rnd(-shake,shake),rnd(-shake,shake),0));
   camera.lookAt(camTarget.x, 0, camTarget.z); camera.aspect = aspect; camera.updateProjectionMatrix();
@@ -1624,7 +1641,7 @@ function teamGems(t){ return units.filter(u=>u.team===t).reduce((s,u)=>s+u.gems,
 
 // ---------- combat ----------
 const MUZZLE = { blaze:'#ffb43a', bolt:'#7ff3ff', frost:'#bfeaff', melody:'#ff9ad8', shade:'#d9c8ff', boulder:'#d9b98a' };
-function addSup(u, amt) { const was = u.sup; u.sup = Math.min(100, u.sup + amt); if (u.isPlayer && was<100 && u.sup>=100) Snd.play('ready'); }
+function addSup(u, amt) { const was = u.sup; u.sup = Math.min(100, u.sup + amt); if (u.isPlayer && was<100 && u.sup>=100) { Snd.play('ready'); pushPopup('SUPER KLAAR!','#ffd23a'); buzz(30); } }
 function fire(u, ang, isSuper) {
   const b = u.b;
   if (!isSuper && mode==='ball' && ball && ball.carrier===u) { u.ang = ang; kickBall(u, ang); return; }
@@ -1632,6 +1649,7 @@ function fire(u, ang, isSuper) {
   const mx = u.x+Math.cos(ang)*26, mz = u.y+Math.sin(ang)*26;
   if (isSuper) {
     const s = b.sup; Snd.play('super', u.x, u.y);
+    if (u.isPlayer) { punch = 1; flashFx = { c:b.color, t0:performance.now() }; }
     if (s.type === 'slam') {
       fx.push({ kind:'ring', x:u.x, y:u.y, r:10, max:s.radius, t:0, life:.4, color:b.color });
       fx.push({ kind:'ring', x:u.x, y:u.y, r:6, max:s.radius*.7, t:0, life:.3, color:'#ffffff' });
@@ -1698,7 +1716,9 @@ function damage(t, src, dmg) {
   if (t.hp <= 0) kill(t, src);
 }
 function kill(u, src) {
-  u.dead = true; u.respT = RESPAWN; u.hp = 0; u.atkBuf = null; Snd.play('kill', u.x, u.y);
+  u.dead = true; u.deadT = 0; u.respT = RESPAWN; u.hp = 0; u.atkBuf = null; Snd.play('kill', u.x, u.y);
+  hitStop = (u.isPlayer || (src && src.isPlayer)) ? .12 : .05; if (u.isPlayer) flashFx = { c:'#ff2a2a', t0:performance.now() }; else if (src && src.isPlayer) punch = Math.max(punch,.5);
+  for (let i=0;i<5;i++) burst(u.x,30,u.y,['#ffd23a','#ffffff','#ff9a3a'][i%3],3,230,.8,4.2,380);
   feed.push({ a: src ? src.b.name : null, at: src ? src.team : -1, b:u.b.name, bt:u.team, t0:performance.now(), me: !!(src && src.isPlayer), died: u.isPlayer });
   if (src && src.isPlayer) pushPopup('KO!', '#ffd23a'); if (u.isPlayer) { pushPopup('Uitgeschakeld', '#ff8a8a'); buzz(70); }
   if (src && src.isPlayer && stats) stats.kills++;
@@ -1711,7 +1731,7 @@ function kill(u, src) {
 function respawn(u) {
   const [x,y] = SPAWNS[u.team][u.idx];
   Object.assign(u, { x, y, hp:u.b.hp, ammo:3, reload:0, dead:false, flash:0, sup:0, pop:0, px:x, py:y, lx:x, ly:y, stunT:0, slowT:0, sinceHit:9 });
-  burst(x,10,y,'#ffffff',10,120,.4,2.4); if (u.isPlayer) Snd.play('respawn');
+  u.deadT = 9; fx.push({ kind:'ring', x, y, r:6, max:60, t:0, life:.5, color:u.team?'#ff8a8a':'#8ac8ff' }); burst(x,10,y,u.team?'#ff8a8a':'#8ac8ff',16,140,.5,2.8); burst(x,10,y,'#ffffff',10,120,.4,2.4); if (u.isPlayer) Snd.play('respawn');
 }
 
 // ---------- movement / input ----------
@@ -1939,6 +1959,7 @@ function kickoff() {
 let introN = 99;
 function update(dt) {
   if (state==='menu') return;
+  if (hitStop>0) { hitStop -= dt; dt *= .06; }
   fx.forEach(f=>f.t+=dt); fx = fx.filter(f=>f.t<f.life);
   texts.forEach(t=>t.t+=dt); texts = texts.filter(t=>t.t<.8);
   if (state==='intro') {
@@ -2011,8 +2032,14 @@ function update(dt) {
     }
   }
 }
+function poseEnd(winner) {
+  const mine = units.filter(u=>u.team===0).sort((a,b)=>a.idx-b.idx), off = [[0,14],[-72,-12],[72,-12]], ex = 140;
+  mine.forEach((u,i)=>{ Object.assign(u, { dead:false, hp:u.b.hp, x:ex+off[i][0], y:STAGE.z+off[i][1], ang:Math.PI/2, vang:Math.PI/2, pop:0, recoil:0, sup:0, flash:0, stunT:0, slowT:0, cheerT:.25+i*.3, deadT:9 }); u.px = u.x; u.py = u.y; });
+  for (const u of units) if (u.team!==0) { u.dead = true; u.deadT = 9; }
+  bullets = []; gems = []; fx = []; texts = []; ball = null; endWin = winner;
+}
 function endMatch(winner) {
-  state='end'; aimDisp = lockTarget = null; touch.atk = touch.sup = touch.move = null;
+  state='end'; poseEnd(winner); aimDisp = lockTarget = null; touch.atk = touch.sup = touch.move = null;
   Snd.play(winner===0?'win':winner===1?'lose':'beep');
   const T = document.getElementById('endTitle');
   T.textContent = winner===0?'VICTORY!':winner===1?'DEFEAT':'DRAW';
@@ -2068,11 +2095,14 @@ function plate(x,y,w,h,c1,c2) {
 let U = 1;
 function drawHUD(p, t) {
   hctx.setTransform(1,0,0,1,0,0); hctx.clearRect(0,0,hud.width,hud.height);
-  if (!units.length || state==='menu') return;
+  if (!units.length || state==='menu' || state==='end') return;
   U = clamp(innerHeight/420,.8,1.5) * hudDpr;
   const cx = hud.width/2, safeT = 10*U;
   { const vg = hctx.createRadialGradient(cx,hud.height/2,Math.min(hud.width,hud.height)*.42,cx,hud.height/2,Math.hypot(hud.width,hud.height)*.56);
     vg.addColorStop(0,'rgba(8,5,30,0)'); vg.addColorStop(1,'rgba(8,5,30,.45)'); hctx.fillStyle = vg; hctx.fillRect(0,0,hud.width,hud.height); }
+  if (flashFx) { const k = (performance.now()-flashFx.t0)/450; if (k>=1) flashFx = null; else {
+    const fg = hctx.createRadialGradient(cx,hud.height/2,Math.min(hud.width,hud.height)*.25,cx,hud.height/2,Math.hypot(hud.width,hud.height)*.6);
+    fg.addColorStop(0,'rgba(0,0,0,0)'); fg.addColorStop(1,flashFx.c); hctx.globalAlpha = .6*(1-k); hctx.fillStyle = fg; hctx.fillRect(0,0,hud.width,hud.height); hctx.globalAlpha = 1; } }
   // ---- world-anchored ----
   for (const u of units) {
     if (u.dead || !visibleTo(u,0) || u.pop<.5) continue;
