@@ -37,6 +37,6 @@ Vier thema-arena's, elk met eigen indeling per modus, verlichting, props, wandst
 
 ## Game feel
 
-Hit-stop bij KO's, camera-punch en gekleurde schermflits bij een super, SUPER KLAAR-melding, KO-animatie (omhoog, draaien, krimpen) met sterretjes, respawn-ring, en een resultaatscherm waar je eigen team juichend (of teleurgesteld) op de map staat, met confetti bij winst.
+Camera-punch en gekleurde schermflits bij een super, SUPER KLAAR-melding, KO-animatie (omhoog, draaien, krimpen) met sterretjes, respawn-ring, en een resultaatscherm waar je eigen team juichend (of teleurgesteld) op de map staat, met confetti bij winst.
 
 Verder: 3-2-1-GO-aftelling met teamopstelling (VS), per-brawler stemgeluid (gesynthetiseerd, bv. bij super/KO/winst), en een "Speler van de match" + "Beste moment"-kaart op het resultaatscherm (dubbele/triple KO, super die meerdere tegenstanders raakt, goals, gems afpakken).

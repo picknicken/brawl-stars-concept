@@ -1753,7 +1753,7 @@ function kill(u, src) {
     if (src.ks.length>=2) addHL(src, src.ks.length===2 ? 'DUBBELE KO!' : src.ks.length===3 ? 'TRIPLE KO!!' : src.ks.length+'x KO!!!', 40*src.ks.length);
     if (u.gems>=3) addHL(src, `Pakt ${u.gems} gems van ${u.b.name} af`, 28+u.gems*8);
     if (ball && ball.carrier===u) addHL(src, 'Onderschept de bal', 35); }
-  hitStop = (u.isPlayer || (src && src.isPlayer)) ? .12 : .05; if (u.isPlayer) flashFx = { c:'#ff2a2a', t0:performance.now() }; else if (src && src.isPlayer) punch = Math.max(punch,.5);
+  if (u.isPlayer) flashFx = { c:'#ff2a2a', t0:performance.now() }; else if (src && src.isPlayer) punch = Math.max(punch,.5);
   for (let i=0;i<5;i++) burst(u.x,30,u.y,['#ffd23a','#ffffff','#ff9a3a'][i%3],3,230,.8,4.2,380);
   feed.push({ a: src ? src.b.name : null, at: src ? src.team : -1, b:u.b.name, bt:u.team, t0:performance.now(), me: !!(src && src.isPlayer), died: u.isPlayer });
   if (src && src.isPlayer) pushPopup('KO!', '#ffd23a'); if (u.isPlayer) { pushPopup('Uitgeschakeld', '#ff8a8a'); buzz(70); }
