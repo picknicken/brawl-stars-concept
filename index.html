@@ -134,6 +134,12 @@
   #endRibbon::before { content:''; position:absolute; inset:8% -6%; background:linear-gradient(180deg,var(--rc1,#ffd23a),var(--rc2,#ff9a1f)); border:5px solid var(--ink); border-radius:10px; box-shadow:0 8px 0 rgba(0,0,0,.4); transform:skewX(-8deg); z-index:-1; }
   #endTitle { margin:0; font-weight:400; font-size:clamp(40px,10vw,92px); letter-spacing:2px; color:#fff; text-shadow:0 6px 0 var(--ink), 4px 0 0 var(--ink), -4px 0 0 var(--ink), 0 -4px 0 var(--ink); }
   @keyframes ribbon { from { transform:scale(.2) rotate(-6deg); opacity:0; } to { transform:none; opacity:1; } }
+  #endMvp .mvp { display:flex; align-items:center; gap:10px; background:linear-gradient(180deg,#5a3cc8,#33237a); border:4px solid var(--ink); border-radius:12px; padding:3px 12px 3px 4px; box-shadow:0 4px 0 rgba(0,0,0,.35); animation:rise .5s .15s ease-out both; text-align:left; }
+  #endMvp .mvp.foe { background:linear-gradient(180deg,#a83a4a,#6a1f2e); }
+  #endMvp .mvpImg { width:46px; height:46px; border-radius:9px; overflow:hidden; flex:none; background:#2a2468; } #endMvp .mvpImg img { width:100%; height:100%; object-fit:cover; display:block; }
+  #endMvp small { display:block; font-size:10px; letter-spacing:1px; color:#ffd23a; } #endMvp b { font-weight:400; font-size:20px; display:block; line-height:1.05; } #endMvp span { font-size:12px; color:var(--mute); font-family:system-ui,sans-serif; }
+  #endMvp .mvpHL { border-left:2px solid rgba(255,255,255,.25); padding-left:10px; } #endMvp .mvpHL b { font-size:16px; color:#fff; }
+  @media (max-height:460px) { #end { gap:5px; } #endTitle { font-size:clamp(34px,13vh,60px); } #endStats div { padding:1px 10px; min-width:70px; } #endStats b { font-size:20px; } #endStats small { font-size:10px; } .rew { font-size:17px; padding:1px 12px 1px 7px; } #end .btn { padding-top:7px; padding-bottom:7px; font-size:20px; } #endMvp .mvpImg { width:38px; height:38px; } }
   #endStats, #endRewards { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
   #endStats div { background:linear-gradient(180deg,var(--panel2),var(--panel)); border:4px solid var(--ink); border-radius:12px; padding:4px 14px; min-width:86px; animation:rise .5s ease-out both; box-shadow:0 4px 0 rgba(0,0,0,.35); }
   #endStats div:nth-child(2) { animation-delay:.08s; } #endStats div:nth-child(3) { animation-delay:.16s; } #endStats div:nth-child(4) { animation-delay:.24s; }
@@ -216,6 +222,7 @@
 </div>
 <div id="end" class="overlay hidden">
   <div id="endRibbon"><h1 id="endTitle"></h1></div>
+  <div id="endMvp"></div>
   <div id="endStats"></div>
   <div id="endRewards"></div>
   <div class="row"><button class="btn" id="again">OPNIEUW</button><button class="btn alt" id="toMenu">MENU</button></div>
@@ -375,6 +382,28 @@ const Snd = (()=>{
     win:v=>{ [523,659,784,1046,784,1046,1318].forEach((f,i)=>tone(f,.22,'square',.2,null,i*.13)); },
     lose:v=>{ [392,370,349,330].forEach((f,i)=>tone(f,.3,'sawtooth',.18,null,i*.2)); },
   };
+  // synthetic "voice": sawtooth through two formant filters (vowel sounds)
+  const VOW = { a:[800,1250], o:[500,900], e:[520,1800], i:[310,2300], u:[330,800] };
+  const VC = { blaze:{ p:105, v:'oa', vib:.0 }, bolt:{ p:215, v:'ei', vib:.0 }, boulder:{ p:78, v:'ou', vib:.0 }, frost:{ p:255, v:'ia', vib:.0 }, melody:{ p:330, v:'ae', vib:.035 }, shade:{ p:170, v:'ei', vib:.0 } };
+  function say(id, kind, vol) {
+    if (!ac) return; const c = VC[id]; if (!c) return;
+    const hop = (delay, f0, f1, dur, v0, v1, vl)=>{
+      const t = T()+delay, o = ac.createOscillator(), g = ac.createGain(), mix = ac.createGain(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f0,t); o.frequency.linearRampToValueAtTime(f1,t+dur);
+      if (c.vib) { const l = ac.createOscillator(), lg = ac.createGain(); l.frequency.value = 6.2; lg.gain.value = f0*c.vib; l.connect(lg); lg.connect(o.frequency); l.start(t); l.stop(t+dur+.05); }
+      g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(Math.max(.0002,vl*vol),t+.03); g.gain.setValueAtTime(Math.max(.0002,vl*vol),t+dur*.7); g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+      for (let k=0;k<2;k++) { const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 7+k*3; f.frequency.setValueAtTime(VOW[v0][k],t); f.frequency.linearRampToValueAtTime(VOW[v1][k],t+dur);
+        const fg = ac.createGain(); fg.gain.value = k?.55:1; o.connect(f); f.connect(fg); fg.connect(mix); }
+      mix.connect(g); g.connect(sfxG); o.start(t); o.stop(t+dur+.05);
+      if (id==='blaze'||id==='boulder') noise(dur*.8, .08*vol, 900, 'bandpass', delay);
+    };
+    const p = c.p, a = c.v[0], b = c.v[1];
+    if (kind==='super') hop(0, p*.9, p*1.6, .5, a, b, 1.6);
+    else if (kind==='ko') hop(0, p*1.35, p*.6, .5, b, 'o', 1.5);
+    else if (kind==='go') hop(0, p, p*1.3, .24, a, b, 1.3);
+    else if (kind==='win') { hop(0, p*1.1, p*1.5, .22, a, b, 1.4); hop(.26, p*1.2, p*1.8, .34, b, a, 1.5); }
+  }
+  for (const id in VC) for (const k of ['super','ko','go','win']) S['v_'+id+'_'+k] = v=>say(id,k,v);
   function play(name, x, y, vol) {
     if (!ac || muted) return;
     let v = vol===undefined ? 1 : vol;
@@ -1607,10 +1636,12 @@ function adaptQuality(dt) {
 // =====================================================================
 //  GAME
 // =====================================================================
+let hl = [];
+function addHL(u, text, score) { hl.push({ u, text, score }); }
 function newUnit(team, idx, b, isPlayer) {
   const [x,y] = SPAWNS[team][idx];
   return { team, idx, b, x, y, hp:b.hp, ammo:3, reload:0, sup:0, gems:0, dead:false, respT:0, isPlayer,
-           ang: team?Math.PI:0, shootCd:0, botT:0, strafe:Math.random()<.5?1:-1, flash:0, recoil:0, pop:1, atkBuf:null };
+           st:{ k:0, dmg:0, gems:0, goals:0, heal:0 }, ks:[], ang: team?Math.PI:0, shootCd:0, botT:0, strafe:Math.random()<.5?1:-1, flash:0, recoil:0, pop:1, atkBuf:null };
 }
 function startMatch() {
   if (state==='end') { setMap(pickOther()); } matchPlayed = true;
@@ -1625,7 +1656,7 @@ function startMatch() {
   score = [0,0]; ball = mode==='ball' ? newBall() : null; matchOver = -2; overtime = false; goalT = 0; introN = 99;
   timeLeft = mode==='ball' ? BALL_TIME : MATCH_TIME; holdT = 0; holdTeam = -1; gemTimer = 2; shake = 0; introT = INTRO;
   introTitle = mode==='ball' ? 'BRAWL BALL' : 'GEM GRAB'; applyModeVisuals();
-  stats = { kills:0, dmg:0, gems:0, goals:0 };
+  stats = { kills:0, dmg:0, gems:0, goals:0 }; hl = [];
   units.forEach(u=>u.pop = 0);
   camTarget.set(units[0].x, 0, units[0].y);
   state = 'intro';
@@ -1648,7 +1679,7 @@ function fire(u, ang, isSuper) {
   u.recoil = 1; u.ang = ang; u.lastFire = isSuper ? 'super' : 'atk';
   const mx = u.x+Math.cos(ang)*26, mz = u.y+Math.sin(ang)*26;
   if (isSuper) {
-    const s = b.sup; Snd.play('super', u.x, u.y);
+    const s = b.sup; Snd.play('super', u.x, u.y); Snd.play('v_'+b.id+'_super', u.x, u.y, .9); u.inSup = true; u.supHits = 0;
     if (u.isPlayer) { punch = 1; flashFx = { c:b.color, t0:performance.now() }; }
     if (s.type === 'slam') {
       fx.push({ kind:'ring', x:u.x, y:u.y, r:10, max:s.radius, t:0, life:.4, color:b.color });
@@ -1672,6 +1703,7 @@ function fire(u, ang, isSuper) {
       for (const a of units) if (!a.dead && dist(a,u) < s.radius+R) { if (a.team===u.team) healUnit(a,u,s.heal); else damage(a,u,s.dmg); }
       burst(u.x,14,u.y,'#ff9ad8',22,150,.6,3,-30);
     } else if (s.type === 'dash') dash(u, ang, s);
+    u.inSup = false; if (u.supHits>=2) addHL(u, `Super raakt ${u.supHits} tegenstanders!`, 45*u.supHits);
     u.sup = 0; return;
   }
   const a = b.atk; Snd.play('shoot_'+b.id, u.x, u.y);
@@ -1704,11 +1736,11 @@ function healUnit(t, src, amt) {
   const a = Math.min(amt, t.b.hp - t.hp); t.hp += a;
   texts.push({ x:t.x+rnd(-8,8), y:t.y, s:'+'+Math.round(a), t:0, color:'#7dffa0' });
   burst(t.x,26,t.y,'#7dffa0',6,90,.5,2.2,-40); Snd.play('heal', t.x, t.y, .6);
-  if (src && src!==t) addSup(src, a/30);
+  if (src && src!==t) { addSup(src, a/30); if (src.st) src.st.heal += a; }
 }
 function damage(t, src, dmg) {
   if (t.dead) return;
-  t.hp -= dmg; t.flash = .12; t.sinceHit = 0;
+  t.hp -= dmg; t.flash = .12; t.sinceHit = 0; if (src && src.st) src.st.dmg += dmg; if (src && src.inSup) src.supHits++;
   Snd.play('hit', t.x, t.y, .8); if (t.isPlayer) buzz(14);
   burst(t.x,24,t.y,'#ffe27a',6,130,.3,2.2);
   texts.push({ x:t.x+rnd(-8,8), y:t.y, s:String(Math.round(dmg)), t:0, color: t.team===0?'#ff9a9a':'#ffffff' });
@@ -1716,7 +1748,11 @@ function damage(t, src, dmg) {
   if (t.hp <= 0) kill(t, src);
 }
 function kill(u, src) {
-  u.dead = true; u.deadT = 0; u.respT = RESPAWN; u.hp = 0; u.atkBuf = null; Snd.play('kill', u.x, u.y);
+  u.dead = true; u.deadT = 0; u.respT = RESPAWN; u.hp = 0; u.atkBuf = null; Snd.play('kill', u.x, u.y); Snd.play('v_'+u.b.id+'_ko', u.x, u.y, .8);
+  if (src && src.st && src.team!==u.team) { const nowK = performance.now(); src.st.k++; src.ks = (src.ks||[]).filter(x=>nowK-x<7000); src.ks.push(nowK);
+    if (src.ks.length>=2) addHL(src, src.ks.length===2 ? 'DUBBELE KO!' : src.ks.length===3 ? 'TRIPLE KO!!' : src.ks.length+'x KO!!!', 40*src.ks.length);
+    if (u.gems>=3) addHL(src, `Pakt ${u.gems} gems van ${u.b.name} af`, 28+u.gems*8);
+    if (ball && ball.carrier===u) addHL(src, 'Onderschept de bal', 35); }
   hitStop = (u.isPlayer || (src && src.isPlayer)) ? .12 : .05; if (u.isPlayer) flashFx = { c:'#ff2a2a', t0:performance.now() }; else if (src && src.isPlayer) punch = Math.max(punch,.5);
   for (let i=0;i<5;i++) burst(u.x,30,u.y,['#ffd23a','#ffffff','#ff9a3a'][i%3],3,230,.8,4.2,380);
   feed.push({ a: src ? src.b.name : null, at: src ? src.team : -1, b:u.b.name, bt:u.team, t0:performance.now(), me: !!(src && src.isPlayer), died: u.isPlayer });
@@ -1943,7 +1979,7 @@ function ballUpdate(dt) {
 }
 function scored(team) {
   score[team]++; state = 'goal'; goalT = 2.8; goalTeam = team; Snd.play('goal');
-  if (ball.lastKick && ball.lastKick.team===team && ball.lastKick.isPlayer) stats.goals++;
+  if (ball.lastKick && ball.lastKick.team===team) { ball.lastKick.st.goals++; addHL(ball.lastKick, 'GOAL!', 60); if (ball.lastKick.isPlayer) stats.goals++; }
   matchOver = (score[team]>=BALL_WIN || overtime) ? team : -2;
   const gx = team===0?W:0;
   for (const c of ['#ffd23a','#ff5a5a','#3da5ff','#7dffa0','#ffffff']) burst(gx,40,H/2,c,16,260,1.3,3.4);
@@ -1963,7 +1999,7 @@ function update(dt) {
   fx.forEach(f=>f.t+=dt); fx = fx.filter(f=>f.t<f.life);
   texts.forEach(t=>t.t+=dt); texts = texts.filter(t=>t.t<.8);
   if (state==='intro') {
-    introT -= dt; const n = Math.ceil(introT-.4); if (n!==introN) { introN = n; if (n>=1) Snd.play('beep'); else if (n===0) Snd.play('go'); }
+    introT -= dt; const n = Math.ceil(introT-.4); if (n!==introN) { introN = n; if (n>=1) { Snd.play('beep'); punch = .45; } else if (n===0) { Snd.play('go'); Snd.play('v_'+units[0].b.id+'_go', undefined, undefined, 1); punch = 1; shake = 6; flashFx = { c:'#7dff8a', t0:performance.now() }; } }
     if (introT<=0) state = 'play';
     for (const u of units) u.pop = Math.min(1,u.pop+dt*1.5);
     return;
@@ -2016,7 +2052,7 @@ function update(dt) {
       if (!hitsWall(g.x,ny,5)) g.y=ny; else g.vy*=-.5;
       g.x = clamp(g.x,8,W-8); g.y = clamp(g.y,8,H-8);
       g.vx*=Math.pow(.02,dt); g.vy*=Math.pow(.02,dt);
-      if (g.age>.3) for (const u of units) if (!u.dead && dist(u,g) < R+10) { u.gems++; g.taken=true; if (u.isPlayer) stats.gems++; Snd.play('gem', g.x, g.y, .8); burst(g.x,16,g.y,'#e2b8ff',6,100,.3,2); break; }
+      if (g.age>.3) for (const u of units) if (!u.dead && dist(u,g) < R+10) { u.gems++; g.taken=true; u.st.gems++; if (u.isPlayer) stats.gems++; Snd.play('gem', g.x, g.y, .8); burst(g.x,16,g.y,'#e2b8ff',6,100,.3,2); break; }
     }
     gems = gems.filter(g=>!g.taken);
     const g0=teamGems(0), g1=teamGems(1);
@@ -2038,8 +2074,16 @@ function poseEnd(winner) {
   for (const u of units) if (u.team!==0) { u.dead = true; u.deadT = 9; }
   bullets = []; gems = []; fx = []; texts = []; ball = null; endWin = winner;
 }
+function mvpCard(winner) {
+  const sc = u=>u.st.k*3 + u.st.dmg/1500 + u.st.gems*.6 + u.st.goals*6 + u.st.heal/1200;
+  const best = units.slice().sort((a,b)=>sc(b)-sc(a))[0]; if (!best || sc(best)<.5) { $('endMvp').innerHTML = ''; return; }
+  const myHL = hl.filter(x=>x.u===best).sort((a,b)=>b.score-a.score)[0] || hl.slice().sort((a,b)=>b.score-a.score)[0];
+  const bits = []; if (best.st.k) bits.push(best.st.k+" KO's"); if (best.st.dmg>0) bits.push((best.st.dmg/1000).toFixed(1)+'k schade'); if (best.st.gems) bits.push(best.st.gems+' gems'); if (best.st.goals) bits.push(best.st.goals+' goals'); if (best.st.heal>0) bits.push((best.st.heal/1000).toFixed(1)+'k heling');
+  const who = best.isPlayer ? 'JIJ' : (best.team===0 ? 'Teamgenoot' : 'Tegenstander');
+  $('endMvp').innerHTML = `<div class="mvp ${best.team?'foe':''}"><div class="mvpImg">${imgFor(best.b, best.skin||'')}</div><div><small>SPELER VAN DE MATCH · ${who}</small><b>${best.b.name}</b><span>${bits.join(' · ')}</span></div>${myHL?`<div class="mvpHL"><small>BESTE MOMENT</small><b>${myHL.u.b.name}: ${myHL.text}</b></div>`:''}</div>`;
+}
 function endMatch(winner) {
-  state='end'; poseEnd(winner); aimDisp = lockTarget = null; touch.atk = touch.sup = touch.move = null;
+  state='end'; popups = []; flashFx = null; poseEnd(winner); mvpCard(winner); if (winner===0) setTimeout(()=>Snd.play('v_'+units[0].b.id+'_win', undefined, undefined, 1), 500); aimDisp = lockTarget = null; touch.atk = touch.sup = touch.move = null;
   Snd.play(winner===0?'win':winner===1?'lose':'beep');
   const T = document.getElementById('endTitle');
   T.textContent = winner===0?'VICTORY!':winner===1?'DEFEAT':'DRAW';
@@ -2194,6 +2238,8 @@ function drawHUD(p, t) {
     const k = introT, big = 1+ (k%1)*.35;
     hctx.fillStyle='rgba(8,5,24,.35)'; hctx.fillRect(0,0,hud.width,hud.height);
     txt(introTitle, cx, hud.height*.34, 64*U, '#ffd23a'); txt(curMap.name.toUpperCase(), cx, hud.height*.34-52*U, 18*U, '#ffffff'); txt(mode==='ball' ? 'Scoor 2 goals in het doel van de tegenstander!' : 'Pak 10 gems en houd ze vast!', cx, hud.height*.34+30*U, 20*U, '#ffffff');
+    { const ty = hud.height*.84, nm = t=>units.filter(u=>u.team===t).map(u=>u.b.name).join('  ·  ');
+      txt(nm(0), cx-46*U, ty, 20*U, '#8ac8ff', 'right'); txt('VS', cx, ty, 24*U, '#ffd23a'); txt(nm(1), cx+46*U, ty, 20*U, '#ff9a9a', 'left'); }
     const n = Math.ceil(k-.4); txt(n>0?String(n):'GO!', cx, hud.height*.62, (n>0?90:80)*U*big, n>0?'#ffffff':'#7dff8a');
   }
   if (state==='goal') {
