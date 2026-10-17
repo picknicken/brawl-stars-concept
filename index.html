@@ -1567,7 +1567,31 @@ const podium = new THREE.Group();
 podium.add(mk(new THREE.CylinderGeometry(42,46,8,40), '#4a40b8', { pos:[0,4,0], ol:1.2 }));
 podium.add(mk(new THREE.CylinderGeometry(36,36,2,40), '#ffd23a', { pos:[0,8.6,0], extra:{ emissive:new THREE.Color('#ff9a1f'), emissiveIntensity:.35 }, ol:.8 }));
 podium.position.set(STAGE.x,0,STAGE.z); podium.visible = false; scene.add(podium);
+// ---- Brawl-Stars-style hub backdrop: purple stage, glow, faint skull pattern ----
+const hubBack = (()=>{
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 640; const g = c.getContext('2d');
+  const bg = g.createLinearGradient(0,0,0,640); bg.addColorStop(0,'#4a22b0'); bg.addColorStop(.6,'#2e1480'); bg.addColorStop(1,'#1a0c4a'); g.fillStyle = bg; g.fillRect(0,0,1024,640);
+  for (let r=0;r<6;r++) for (let i=-1;i<9;i++) { const x = i*130+(r%2?65:0), y = r*118+40; g.save(); g.translate(x,y); g.fillStyle = 'rgba(255,255,255,.055)';
+    g.beginPath(); g.arc(0,0,40,0,7); g.fill(); g.fillStyle = 'rgba(40,10,110,.55)'; g.beginPath(); g.ellipse(-14,-4,9,12,0,0,7); g.ellipse(14,-4,9,12,0,0,7); g.fill();
+    g.beginPath(); g.moveTo(-16,16); g.quadraticCurveTo(0,28,16,16); g.quadraticCurveTo(0,22,-16,16); g.fill(); g.restore(); }
+  const rg = g.createRadialGradient(512,330,10,512,330,420); rg.addColorStop(0,'rgba(190,140,255,.75)'); rg.addColorStop(.5,'rgba(120,70,230,.35)'); rg.addColorStop(1,'rgba(60,20,150,0)'); g.fillStyle = rg; g.fillRect(0,0,1024,640);
+  const vg = g.createRadialGradient(512,320,300,512,320,720); vg.addColorStop(0,'rgba(10,0,40,0)'); vg.addColorStop(1,'rgba(10,0,40,.6)'); g.fillStyle = vg; g.fillRect(0,0,1024,640);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1500,940), new THREE.MeshBasicMaterial({ map:srgb(new THREE.CanvasTexture(c)), fog:false, depthWrite:false }));
+  m.position.set(STAGE.x, 120, STAGE.z-300); m.visible = false; scene.add(m); return m; })();
+const hubFloor = (()=>{
+  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d'), rg = g.createRadialGradient(128,128,0,128,128,128);
+  rg.addColorStop(0,'rgba(20,6,60,.9)'); rg.addColorStop(.6,'rgba(30,10,90,.7)'); rg.addColorStop(1,'rgba(40,10,120,0)'); g.fillStyle = rg; g.fillRect(0,0,256,256);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1100,700), new THREE.MeshBasicMaterial({ map:srgb(new THREE.CanvasTexture(c)), transparent:true, depthWrite:false, fog:false }));
+  m.rotation.x = -Math.PI/2; m.position.set(STAGE.x, .6, STAGE.z-40); m.visible = false; scene.add(m); return m; })();
+let hubLook = false; const fogKeep = scene.fog;
+function setHubLook(on) {
+  if (on===hubLook) return; hubLook = on;
+  hubBack.visible = hubFloor.visible = on; mapGroup.visible = !on; scene.fog = on ? null : fogKeep;
+  if (on) { midCurb.visible = ballGroup.visible = mineGroup.visible = false; scene.background.set('#1a0c4a'); }
+  else { applyModeVisuals(); if (curMap) scene.background.set(THEMES[curMap.theme].sky); }
+}
 function renderMenu3D(dt, t) {
+  setHubLook(true);
   const bi = scrName==='detail' ? detailI : sel, pb = BRAWLERS[bi], psk = previewSkinOv!==undefined ? (previewSkinOv||null) : equippedSkin(pb.id), pkey = bi+':'+psk+':'+GLB.ver;
   if (previewId !== pkey) {
     if (previewMesh) scene.remove(previewMesh);
@@ -1578,7 +1602,7 @@ function renderMenu3D(dt, t) {
   previewRot += dt*.9; const d = previewMesh.userData, pu = previewUnit, tk = Math.floor(t/4.5);
   if (pu.tk !== tk) { pu.tk = tk; pu.recoil = 1; pu.lastFire = 'cheer'; }
   animateChar(pu, previewMesh, dt, t);
-  previewMesh.position.set(STAGE.x, 9, STAGE.z); previewMesh.rotation.y = -(.55 + Math.sin(previewRot)*.55); const sc = 1.35/d.S;
+  previewMesh.position.set(STAGE.x, 9, STAGE.z); previewMesh.rotation.y = -(.55 + Math.sin(previewRot)*.55); const sc = 1.6/d.S;
   previewMesh.scale.setScalar(sc * (previewMesh.userData.popv = Math.min(1,(previewMesh.userData.popv||0)+dt*4)));
   const aspect = cv.clientWidth/cv.clientHeight;
   const dd = 340/Math.min(1, aspect*.75);
@@ -1590,6 +1614,7 @@ function renderMenu3D(dt, t) {
   updateParticles(dt); renderer.render(scene, camera);
 }
 function render3D(dt, t) {
+  setHubLook(false);
   const player = units[0]; updateOutlineUniforms();
   for (const u of units) {
     let m = unitMesh.get(u); if (!m) { m = buildChar(u); unitMesh.set(u,m); }
