@@ -12,7 +12,7 @@
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { margin:0; height:100%; background:var(--bg); color:#fff; font-family:var(--font); overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; }
   canvas { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
-  #c { filter:saturate(1.14) contrast(1.05); }
+  #c { filter:saturate(1.26) contrast(1.1); }
   #hud { pointer-events:none; }
   .overlay { position:fixed; inset:0; z-index:3; pointer-events:none; }
   .overlay.hidden, .hidden { display:none !important; }
@@ -527,8 +527,8 @@ const mapGroup = new THREE.Group(); scene.add(mapGroup);
 const flames = [], glows = [];
 let motes = null;
 const THEMES = {
-  meadow: { sky:'#86d4ff', fog:'#a8e0ff', hemi:['#dff2ff','#b59a74',1.0], sun:['#fff1d6',1.25], rim:'#9fd0ff', outer:'#58b04c',
-    tile:['#e0c27c','#e8cd8a'], line:'rgba(150,110,50,.18)', curb:['#9b7a58','#c9a174'], wall:'brick', bush:['#36b552','#4bd062'], mote:['#fff6b0',4,'float'] },
+  meadow: { sky:'#86d4ff', fog:'#a8e0ff', hemi:['#dff2ff','#a58a64',.82], sun:['#fff1d6',1.0], rim:'#9fd0ff', outer:'#58b04c',
+    tile:['#cfae6c','#d9ba78'], line:'rgba(150,110,50,.18)', curb:['#9b7a58','#c9a174'], wall:'brick', bush:['#36b552','#4bd062'], mote:['#fff6b0',4,'float'] },
   desert: { sky:'#ffd08a', fog:'#ffddaa', hemi:['#ffe6c0','#b07a45',.72], sun:['#ffd2a0',1.0], rim:'#ffb070', outer:'#c98544',
     tile:['#d68f4a','#e0a05c'], line:'rgba(140,70,20,.16)', curb:['#a8602f','#dc9650'], wall:'sandstone', bush:['#8b9b3a','#a9b64c'], mote:['#ffe6b0',3.2,'dust'] },
   ice: { sky:'#bfe6ff', fog:'#dff3ff', hemi:['#dcecff','#8aa6cc',.62], sun:['#eef6ff',.8], rim:'#a8d8ff', outer:'#c9e2f5',
@@ -839,7 +839,7 @@ const CH = {};  // per-brawler build recipes
 //  CHARACTER KIT v2: screen-space outlines, rim-lit toon materials,
 //  palettes, skin recipes with extra parts, chains (cloth/hair), wings
 // =====================================================================
-const OUT_PX = { value:2.4 }, OUT_RES = new THREE.Vector2(800,400), outCache = new Map();
+const OUT_PX = { value:3.1 }, OUT_RES = new THREE.Vector2(800,400), outCache = new Map();
 function outlineMat(mul) {
   const k = mul.toFixed(2); let m = outCache.get(k);
   if (!m) {
@@ -1343,7 +1343,7 @@ function animateChar(u, m, dt, t) {
 //  Falls back to the procedural models above when the files can't load.
 // =====================================================================
 const GLB = { m:{}, ver:0, port:{}, tex:{}, failed:0, started:false };
-const GLB_SCALE = 24;
+const GLB_SCALE = 22, HEAD_S = 1.3;
 const GLB_BASE = { blaze:'Barbarian', bolt:'Rogue_Hooded', boulder:'Knight', frost:'Mage', melody:'Skeleton_Mage', shade:'Rogue' };
 const WEAPON_NODES = {
   Knight:['1H_Sword_Offhand','Badge_Shield','Rectangle_Shield','Round_Shield','Spike_Shield','1H_Sword','2H_Sword'],
@@ -1367,7 +1367,7 @@ function glbSpec(id, skin) {
   return { model, shoot:kit.shoot, sup:kit.sup,
     show: (skin && skin.show) || (same ? kit.show : []),
     ext: (skin && skin.ext) || (same ? kit.ext : null),
-    tint: skin && skin.tint ? skin.tint : (skin && !skin.model && skin.hue!==undefined ? { hue:skin.hue, sat:skin.sat, lit:skin.lit } : null) };
+    tint: skin && skin.tint ? skin.tint : (skin && !skin.model && skin.hue!==undefined ? { hue:skin.hue, sat:skin.sat, lit:skin.lit } : { hue:0, sat:1.3, lit:1.04 }) };
 }
 const glbReady = spec=>!!GLB.m[spec.model] && (!spec.ext || Object.values(spec.ext).every(n=>GLB.m[n]));
 
@@ -1430,9 +1430,9 @@ function buildCharGLB(u, spec, noAdd) {
   const mixer = new THREE.AnimationMixer(inst), acts = {};
   for (const clip of M.anims) acts[clip.name] = mixer.clipAction(clip);
   if (acts.Idle) acts.Idle.play();
-  u.top = 66;
+  u.top = 80; const head = inst.getObjectByName('head');
   if (!noAdd) scene.add(root);
-  root.userData = { glb:true, mixer, acts, cur:'Idle', oneT:0, spec, rig, flash, ring, disc, id:u.b.id, S:1, lastRecoil:0, hover:0 };
+  root.userData = { glb:true, head, mixer, acts, cur:'Idle', oneT:0, spec, rig, flash, ring, disc, id:u.b.id, S:1, lastRecoil:0, hover:0 };
   return root;
 }
 function glbPlayOnce(d, name, speed) {
@@ -1458,7 +1458,7 @@ function animateGLB(u, m, dt, t) {
   if (u.recoil>.9 && d.lastRecoil<=.9) glbPlayOnce(d, u.lastFire==='super' ? d.spec.sup : u.lastFire==='cheer' ? 'Cheer' : d.spec.shoot, u.lastFire==='cheer' ? 1 : 1.7);
   d.lastRecoil = u.recoil;
   if (d.oneT>0) d.oneT -= dt; else { const want = walk ? 'Running_A' : 'Idle'; if (d.cur!==want) glbFadeTo(d, want, .14); }
-  d.mixer.update(dt);
+  d.mixer.update(dt); if (d.head) d.head.scale.setScalar(HEAD_S);
   let er = 0, eg = 0, eb = 0, k = 0;
   if (u.flash>0) { er = eg = eb = .9; k = 1; } else if (u.stunT>0) { er = .1; eg = .5+.2*Math.sin(t*12); eb = .9; k = 1; } else if (u.slowT>0) { er = .02; eg = .2; eb = .45; k = 1; }
   for (const f of d.flash) { if (k) f.m.emissive.setRGB(er,eg,eb); else f.m.emissive.copy(f.ec); }
@@ -1476,15 +1476,17 @@ function makeGLBPortrait(bid, skinId) {
     portScene = new THREE.Scene(); portScene.add(new THREE.HemisphereLight('#ffffff','#b0a0d0',1.15)); const dl = new THREE.DirectionalLight('#ffffff',1.1); dl.position.set(80,120,60); portScene.add(dl);
     portCam = new THREE.PerspectiveCamera(24,1,1,600); portRT = new THREE.WebGLRenderTarget(SZ,SZ); portRT.texture.encoding = THREE.sRGBEncoding;
   }
-  portScene.add(root); root.userData.mixer.update(.05); root.updateMatrixWorld(true);
-  portCam.position.set(78,44,14); portCam.lookAt(0,38,0);
+  portScene.add(root); root.userData.mixer.update(.05); if (root.userData.head) root.userData.head.scale.setScalar(HEAD_S); root.updateMatrixWorld(true);
+  portCam.position.set(96,58,16); portCam.lookAt(0,47,0);
   const pc = new THREE.Color(), pa = renderer.getClearAlpha(); renderer.getClearColor(pc);
   const so = OUT_RES.clone(), pxo = OUT_PX.value; OUT_RES.set(SZ,SZ); OUT_PX.value = 2.6;
   renderer.setRenderTarget(portRT); renderer.setClearColor(0x000000,0); renderer.clear(); renderer.render(portScene,portCam); renderer.setRenderTarget(null); renderer.setClearColor(pc,pa);
   OUT_RES.copy(so); OUT_PX.value = pxo;
   const buf = new Uint8Array(SZ*SZ*4); renderer.readRenderTargetPixels(portRT,0,0,SZ,SZ,buf); portScene.remove(root);
   const c = document.createElement('canvas'); c.width = c.height = SZ; const g = c.getContext('2d');
-  const bg = g.createLinearGradient(0,0,0,SZ); bg.addColorStop(0,'#6a5cff'); bg.addColorStop(1,'#2a2468'); g.fillStyle = bg; g.fillRect(0,0,SZ,SZ);
+  const bc = new THREE.Color(b.color), hsl = {}; bc.getHSL(hsl);
+  const bg = g.createLinearGradient(0,0,0,SZ); bg.addColorStop(0,'#'+new THREE.Color().setHSL(hsl.h,.85,.62).getHexString()); bg.addColorStop(1,'#'+new THREE.Color().setHSL(hsl.h,.8,.34).getHexString()); g.fillStyle = bg; g.fillRect(0,0,SZ,SZ);
+  const rg = g.createRadialGradient(SZ*.5,SZ*.45,0,SZ*.5,SZ*.45,SZ*.6); rg.addColorStop(0,'rgba(255,255,255,.45)'); rg.addColorStop(1,'rgba(255,255,255,0)'); g.fillStyle = rg; g.fillRect(0,0,SZ,SZ);
   const img = g.createImageData(SZ,SZ); for (let y=0;y<SZ;y++) img.data.set(buf.subarray((SZ-1-y)*SZ*4,(SZ-y)*SZ*4), y*SZ*4);
   const tmp = document.createElement('canvas'); tmp.width = tmp.height = SZ; tmp.getContext('2d').putImageData(img,0,0); g.drawImage(tmp,0,0);
   return c.toDataURL('image/png');
